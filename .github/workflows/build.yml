@@ -30,13 +30,6 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos
 
-      - name: Diagnose keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/diag.keystore
-          echo "decoded size: $(wc -c < /tmp/diag.keystore) bytes (expected 2758)"
-          echo "b64 length: ${#KEYSTORE_BASE64} chars (expected ~3680)"
 
       - name: Set up release signing
         env:
