@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import '../engine/ludo_engine.dart';
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
 import '../services/settings_service.dart';
 import '../theme/artisan_parlor.dart';
 import '../theme/parlor_themes.dart';
+import 'custom_theme_screen.dart';
 import 'game_screen.dart';
+import 'pro_screen.dart';
 import 'settings_screen.dart';
 
 /// Main menu — Artisan Parlor edition.
@@ -22,23 +25,24 @@ class MenuScreen extends StatefulWidget {
 }
 
 class _MenuScreenState extends State<MenuScreen> {
-  final TipJar _tipJar = TipJar();
+  final StoreService _store = StoreService();
 
   ParlorSettings get _s => widget.settings;
-  ParlorThemeDef get _t => ParlorThemes.byId(_s.themeId);
+  ParlorThemeDef get _t => ParlorThemes.byId(_s.themeId, custom: _s.customTheme);
 
   @override
   void initState() {
     super.initState();
     widget.audio.startMenuMusic();
-    _tipJar.init().then((_) {
+    _store.init().then((_) {
       if (mounted) setState(() {});
     });
-    _tipJar.lastThanks.addListener(_onThanks);
+    _store.lastThanks.addListener(_onThanks);
+    _store.proPurchased.addListener(_onPro);
   }
 
   void _onThanks() {
-    final msg = _tipJar.lastThanks.value;
+    final msg = _store.lastThanks.value;
     if (msg == null || !mounted) return;
     widget.audio.win();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -48,13 +52,22 @@ class _MenuScreenState extends State<MenuScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-    _tipJar.lastThanks.value = null;
+    _store.lastThanks.value = null;
+  }
+
+  void _onPro() {
+    if (_store.proPurchased.value && mounted) {
+      widget.settings.setPro(true);
+      _store.proPurchased.value = false;
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
-    _tipJar.lastThanks.removeListener(_onThanks);
-    _tipJar.dispose();
+    _store.lastThanks.removeListener(_onThanks);
+    _store.proPurchased.removeListener(_onPro);
+    _store.dispose();
     super.dispose();
   }
 
@@ -73,7 +86,8 @@ class _MenuScreenState extends State<MenuScreen> {
       players: players,
       botDifficulty: BotDifficulty.values[_s.difficulty],
     );
-    widget.audio.stopMusic();
+    // App-scoped music: keep playing across screens. GameScreen switches
+    // to the game track on entry; we switch back to menu music on return.
     Navigator.of(context)
         .push(MaterialPageRoute(
       builder: (_) => GameScreen(
@@ -131,6 +145,45 @@ class _MenuScreenState extends State<MenuScreen> {
                   const SizedBox(height: 22),
                   WoodButton(
                       label: '▶  Play', onTap: _play, theme: t, width: 260),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () {
+                      widget.audio.click();
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => ProScreen(
+                          audio: widget.audio,
+                          settings: _s,
+                          store: _store,
+                        ),
+                      ));
+                    },
+                    child: Container(
+                      width: 260,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        gradient: LinearGradient(colors: [
+                          t.accent.withValues(alpha: 0.9),
+                          t.accentDark,
+                        ]),
+                        border: Border.all(
+                            color: t.accentLight, width: 2.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            offset: const Offset(0, 4),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _s.isPro ? '✦  PRO ACTIVE' : '✦  Get PRO',
+                        style: Parlor.label(17,
+                            theme: t, color: t.woodDeep),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 22),
                   _ModeCard(theme: t),
                   const SizedBox(height: 14),
@@ -138,7 +191,7 @@ class _MenuScreenState extends State<MenuScreen> {
                   const SizedBox(height: 14),
                   _NamesCard(theme: t),
                   const SizedBox(height: 14),
-                  _SupportCard(theme: t, tipJar: _tipJar),
+                  _SupportCard(theme: t, store: _store),
                   const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -397,15 +450,27 @@ class _ModeCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('Bot skill:', style: Parlor.body(15, theme: theme)),
+              Text('Mode:', style: Parlor.body(15, theme: theme)),
               const SizedBox(width: 12),
               for (int d = 0; d < 3; d++)
                 _Chip(
                   theme: theme,
-                  label: difficulties[d],
+                  label:
+                      '${d == 2 && !s.isPro ? '🔒 ' : ''}${difficulties[d]}',
                   selected: s.difficulty == d,
-                  onTap: () {
+                  onTap: () async {
                     audio.click();
+                    if (d == 2 && !s.isPro) {
+                      await Navigator.of(context)
+                          .push(MaterialPageRoute(
+                        builder: (_) => ProScreen(
+                          audio: audio,
+                          settings: s,
+                          store: screen._store,
+                        ),
+                      ));
+                      return;
+                    }
                     s.setSetup(
                         players: s.playerCount,
                         botSeats: s.botSeats,
@@ -421,16 +486,28 @@ class _ModeCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-/// Theme / appearance picker.
+/// Theme / appearance picker: 22 themes + custom creator, 12 token shapes,
+/// 6 dice styles — with PRO locks.
 class _ThemeCard extends StatelessWidget {
   final ParlorThemeDef theme;
   const _ThemeCard({required this.theme});
+
+  Future<void> _goPro(BuildContext context, _MenuScreenState screen) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ProScreen(
+        audio: screen.widget.audio,
+        settings: screen._s,
+        store: screen._store,
+      ),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
     final screen = context.findAncestorStateOfType<_MenuScreenState>()!;
     final s = screen._s;
     final audio = screen.widget.audio;
+    final isPro = s.isPro;
     return _Card(
       theme: theme,
       title: 'Parlor Style',
@@ -442,59 +519,52 @@ class _ThemeCard extends StatelessWidget {
             alignment: WrapAlignment.center,
             children: [
               for (final th in ParlorThemes.all)
-                GestureDetector(
+                _ThemeTile(
+                  theme: theme,
+                  th: th,
+                  selected: s.themeId == th.id,
+                  locked:
+                      ParlorThemes.isProTheme(th.id) && !isPro,
                   onTap: () {
                     audio.click();
+                    if (ParlorThemes.isProTheme(th.id) && !isPro) {
+                      _goPro(context, screen);
+                      return;
+                    }
                     s.setTheme(th.id);
                   },
-                  child: Container(
-                    width: 96,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 8, horizontal: 4),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      color: th.woodDeep.withValues(alpha: 0.7),
-                      border: Border.all(
-                        color: s.themeId == th.id
-                            ? th.accentLight
-                            : th.accent.withValues(alpha: 0.35),
-                        width: s.themeId == th.id ? 3 : 1.5,
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            for (final c in th.playerColors)
-                              Container(
-                                width: 14,
-                                height: 14,
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 1.5),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: c,
-                                  border: Border.all(
-                                      color: th.accentLight, width: 1),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          th.name,
-                          style: Parlor.label(10, theme: th),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
+              // Custom theme tile (PRO).
+              _ThemeTile(
+                theme: theme,
+                th: s.customTheme,
+                selected: s.themeId == 'custom',
+                locked: !isPro,
+                custom: true,
+                onTap: () {
+                  audio.click();
+                  if (!isPro) {
+                    _goPro(context, screen);
+                    return;
+                  }
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => CustomThemeScreen(
+                      audio: audio,
+                      settings: s,
+                    ),
+                  ));
+                },
+              ),
             ],
           ),
+          if (!isPro)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '🔒 ${ParlorThemes.all.length - ParlorThemes.freeThemeIds.length} more themes in PRO',
+                style: Parlor.label(12, theme: theme),
+              ),
+            ),
           const SizedBox(height: 14),
           Align(
             alignment: Alignment.centerLeft,
@@ -508,10 +578,15 @@ class _ThemeCard extends StatelessWidget {
               for (int i = 0; i < TokenShapes.names.length; i++)
                 _Chip(
                   theme: theme,
-                  label: TokenShapes.names[i],
+                  label:
+                      '${TokenShapes.isPro(i) && !isPro ? '🔒 ' : ''}${TokenShapes.names[i]}',
                   selected: s.tokenShape == i,
                   onTap: () {
                     audio.click();
+                    if (TokenShapes.isPro(i) && !isPro) {
+                      _goPro(context, screen);
+                      return;
+                    }
                     s.setTokenShape(i);
                   },
                 ),
@@ -529,15 +604,105 @@ class _ThemeCard extends StatelessWidget {
               for (int i = 0; i < DiceStyles.names.length; i++)
                 _Chip(
                   theme: theme,
-                  label: DiceStyles.names[i],
+                  label:
+                      '${DiceStyles.isPro(i) && !isPro ? '🔒 ' : ''}${DiceStyles.names[i]}',
                   selected: s.diceStyle == i,
                   onTap: () {
                     audio.click();
+                    if (DiceStyles.isPro(i) && !isPro) {
+                      _goPro(context, screen);
+                      return;
+                    }
                     s.setDiceStyle(i);
                   },
                 ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeTile extends StatelessWidget {
+  final ParlorThemeDef theme;
+  final ParlorThemeDef th;
+  final bool selected;
+  final bool locked;
+  final bool custom;
+  final VoidCallback onTap;
+  const _ThemeTile({
+    required this.theme,
+    required this.th,
+    required this.selected,
+    required this.locked,
+    required this.onTap,
+    this.custom = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 96,
+            padding:
+                const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: th.woodDeep.withValues(alpha: 0.7),
+              border: Border.all(
+                color: selected
+                    ? th.accentLight
+                    : th.accent.withValues(alpha: 0.35),
+                width: selected ? 3 : 1.5,
+              ),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (final c in th.playerColors)
+                      Container(
+                        width: 14,
+                        height: 14,
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 1.5),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: c,
+                          border: Border.all(
+                              color: th.accentLight, width: 1),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  custom ? '🎨 My Creation' : th.name,
+                  style: Parlor.label(10, theme: th),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (locked)
+            Container(
+              width: 96,
+              height: 62,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.black.withValues(alpha: 0.55),
+              ),
+              child: Icon(Icons.lock,
+                  color: theme.accentLight, size: 22),
+            ),
         ],
       ),
     );
@@ -669,8 +834,8 @@ class _NameFieldState extends State<_NameField> {
 /// Tip jar (IAP).
 class _SupportCard extends StatelessWidget {
   final ParlorThemeDef theme;
-  final TipJar tipJar;
-  const _SupportCard({required this.theme, required this.tipJar});
+  final StoreService store;
+  const _SupportCard({required this.theme, required this.store});
 
   @override
   Widget build(BuildContext context) {
@@ -687,32 +852,45 @@ class _SupportCard extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          if (tipJar.products.isEmpty)
-            Text(
-              tipJar.error ?? 'Loading…',
-              style: Parlor.body(13,
-                  theme: theme,
-                  color: theme.ivory.withValues(alpha: 0.6)),
-            )
-          else
-            Wrap(
+          Builder(builder: (_) {
+            final tips = [
+              store.coffeeProduct,
+              store.chocolateProduct,
+            ].whereType<ProductDetails>().toList();
+            if (!store.storeReady) {
+              return Text(
+                store.error ?? 'Loading…',
+                style: Parlor.body(13,
+                    theme: theme,
+                    color: theme.ivory.withValues(alpha: 0.6)),
+                textAlign: TextAlign.center,
+              );
+            }
+            if (tips.isEmpty) {
+              return Text('Tips coming soon.',
+                  style: Parlor.body(13,
+                      theme: theme,
+                      color: theme.ivory.withValues(alpha: 0.6)));
+            }
+            return Wrap(
               spacing: 10,
               alignment: WrapAlignment.center,
               children: [
-                for (final p in tipJar.products)
+                for (final p in tips)
                   _Chip(
                     theme: theme,
-                    label: p.id == TipJar.chocolateId
+                    label: p.id == StoreService.chocolateId
                         ? '🍫 ${p.price}'
                         : '☕ ${p.price}',
                     selected: false,
                     onTap: () {
                       audio.click();
-                      tipJar.buy(p);
+                      store.buyTip(p);
                     },
                   ),
               ],
-            ),
+            );
+          }),
         ],
       ),
     );

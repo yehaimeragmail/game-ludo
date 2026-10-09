@@ -8,8 +8,11 @@ import 'package:audioplayers/audioplayers.dart';
 /// Reliability design (every call is safe to repeat and safe to overlap):
 /// - Music clips are synthesized ONCE and cached; starting music never blocks
 ///   the UI thread after the first build.
-/// - A [_musicBusy] guard serializes play/stop so rapid calls (menu in/out,
-///   pause/resume, toggles) can never leave the player in a half-started state.
+/// - A [_musicGen] generation counter serializes track changes: every
+///   start/stop bumps the generation, in-flight work from an older request
+///   aborts, and the LATEST request always wins. Overlapping calls (menu in/out,
+///   pause/resume, toggles) can never swallow a start or leave the player
+///   half-started — music is app-scoped and never silently dies.
 /// - Lifecycle uses pause()/resume() so an interruption (call, backgrounding)
 ///   resumes exactly where it left off instead of restarting or dying.
 /// - Every public method catches player errors; audio can never crash the app.
@@ -26,7 +29,10 @@ class ParlorAudio {
   // Cache synthesized clips so we only build them once.
   final Map<String, Uint8List> _cache = {};
 
-  // Music state machine.
+  // Music state machine. [_musicGen] is bumped by every start/stop request;
+  // async work checks it still owns the latest generation before touching
+  // the player, so overlapping requests can never desync the music.
+  int _musicGen = 0;
   bool _musicBusy = false;
   String? _currentTrack; // 'menu' | 'game' | null
   bool _pausedByLifecycle = false;
@@ -234,26 +240,33 @@ class ParlorAudio {
       _clip('lose', () => _arp([392.0, 329.63, 261.63, 196.0], 0.22, 0.04)));
 
   // ----------------------------------------------------------------- music
-  /// Start (or keep) a music track. Serialized: overlapping calls collapse
-  /// into one, and re-requesting the current track is a no-op.
+  /// Start (or keep) a music track. Generation-serialized: the latest request
+  /// always wins; a start issued while an older one is in flight is never
+  /// dropped. Re-requesting the current track just ensures it is audible.
   Future<void> _startTrack(String track, Uint8List Function() bytes) async {
-    if (!musicOn || _disposed) return;
-    if (_musicBusy) return;
-    if (_currentTrack == track) {
+    if (_disposed) return;
+    final gen = ++_musicGen;
+    if (_currentTrack == track && !_pausedByLifecycle) {
       // Already on this track — make sure it is actually audible.
       try {
         await _music.resume();
       } catch (_) {}
       return;
     }
+    // Wait for any in-flight op, then bail if superseded meanwhile.
+    while (_musicBusy) {
+      await Future.delayed(const Duration(milliseconds: 30));
+    }
+    if (gen != _musicGen || _disposed || !musicOn) return;
     _musicBusy = true;
     try {
       await _music.stop();
+      if (gen != _musicGen || _disposed || !musicOn) return;
       _currentTrack = track;
       _pausedByLifecycle = false;
       await _music.play(BytesSource(bytes()));
     } catch (_) {
-      _currentTrack = null;
+      if (gen == _musicGen) _currentTrack = null;
     } finally {
       _musicBusy = false;
     }
@@ -262,12 +275,14 @@ class ParlorAudio {
   Future<void> startMenuMusic() => _startTrack('menu', _menuBytes);
   Future<void> startGameMusic() => _startTrack('game', _gameBytes);
 
+  /// App-scoped stop: cancels any pending start, then stops. Used only when
+  /// the user turns music OFF — never on screen navigation.
   Future<void> stopMusic() async {
-    if (_disposed) return;
-    // Wait for any in-flight start to finish first, then stop.
-    for (int i = 0; i < 20 && _musicBusy; i++) {
-      await Future.delayed(const Duration(milliseconds: 50));
+    ++_musicGen; // cancel any in-flight start
+    while (_musicBusy) {
+      await Future.delayed(const Duration(milliseconds: 30));
     }
+    if (_disposed) return;
     try {
       await _music.stop();
     } catch (_) {}

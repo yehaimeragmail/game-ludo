@@ -65,7 +65,7 @@ class _LudoAppState extends State<LudoApp> with WidgetsBindingObserver {
         title: 'Ludo',
         debugShowCheckedModeBanner: false,
         theme:
-            Parlor.theme(ParlorThemes.byId(widget.settings.themeId)),
+            Parlor.theme(ParlorThemes.byId(widget.settings.themeId, custom: widget.settings.customTheme)),
         home:
             SplashScreen(audio: widget.audio, settings: widget.settings),
       ),

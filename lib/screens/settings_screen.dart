@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
 import '../services/settings_service.dart';
 import '../theme/artisan_parlor.dart';
 import '../theme/parlor_themes.dart';
+import 'pro_screen.dart';
 
 /// Settings — walnut drawer metaphor, theme-aware.
 class SettingsScreen extends StatefulWidget {
@@ -17,21 +19,22 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final TipJar _tipJar = TipJar();
+  final StoreService _store = StoreService();
 
-  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId);
+  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId, custom: widget.settings.customTheme);
 
   @override
   void initState() {
     super.initState();
-    _tipJar.init().then((_) {
+    _store.init().then((_) {
       if (mounted) setState(() {});
     });
-    _tipJar.lastThanks.addListener(_onThanks);
+    _store.lastThanks.addListener(_onThanks);
+    _store.proPurchased.addListener(_onPro);
   }
 
   void _onThanks() {
-    final msg = _tipJar.lastThanks.value;
+    final msg = _store.lastThanks.value;
     if (msg == null || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -40,13 +43,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-    _tipJar.lastThanks.value = null;
+    _store.lastThanks.value = null;
+  }
+
+  void _onPro() {
+    if (_store.proPurchased.value && mounted) {
+      widget.settings.setPro(true);
+      _store.proPurchased.value = false;
+    }
   }
 
   @override
   void dispose() {
-    _tipJar.lastThanks.removeListener(_onThanks);
-    _tipJar.dispose();
+    _store.lastThanks.removeListener(_onThanks);
+    _store.proPurchased.removeListener(_onPro);
+    _store.dispose();
     super.dispose();
   }
 
@@ -132,12 +143,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 const SizedBox(height: 10),
+                _SectionTitle('Ludo PRO', t),
+                SettingRow(
+                  theme: t,
+                  label: s.isPro ? 'PRO active ✦' : 'Unlock PRO',
+                  control: GestureDetector(
+                    onTap: () {
+                      audio.click();
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => ProScreen(
+                          audio: audio,
+                          settings: s,
+                          store: _store,
+                        ),
+                      ));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        color: s.isPro
+                            ? t.accent.withValues(alpha: 0.85)
+                            : Colors.black.withValues(alpha: 0.3),
+                        border: Border.all(
+                            color: t.accentLight, width: 2),
+                      ),
+                      child: Text(
+                        s.isPro ? '✦ PRO' : 'View',
+                        style: Parlor.label(13,
+                            theme: t,
+                            color: s.isPro ? t.woodDeep : t.ivory),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 _SectionTitle('Appearance', t),
                 SettingRow(
                   theme: t,
                   label: 'Theme',
                   control: Text(
-                    ParlorThemes.byId(s.themeId).name,
+                    ParlorThemes.byId(s.themeId, custom: s.customTheme).name,
                     style: Parlor.label(14, theme: t),
                   ),
                 ),
@@ -149,41 +196,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       GestureDetector(
                         onTap: () async {
                           audio.click();
+                          final locked = ParlorThemes.isProTheme(th.id) &&
+                              !s.isPro;
+                          if (locked) {
+                            await Navigator.of(context)
+                                .push(MaterialPageRoute(
+                              builder: (_) => ProScreen(
+                                audio: audio,
+                                settings: s,
+                                store: _store,
+                              ),
+                            ));
+                            return;
+                          }
                           await s.setTheme(th.id);
                         },
-                        child: Container(
-                          width: 64,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            gradient: LinearGradient(colors: [
-                              th.woodMid,
-                              th.accent,
-                            ]),
-                            border: Border.all(
-                              color: s.themeId == th.id
-                                  ? th.accentLight
-                                  : th.accent.withValues(alpha: 0.3),
-                              width: s.themeId == th.id ? 3 : 1.5,
-                            ),
-                          ),
+                        child: Stack(
                           alignment: Alignment.center,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              for (int i = 0; i < 2; i++)
-                                Container(
-                                  width: 10,
-                                  height: 10,
-                                  margin: const EdgeInsets.symmetric(
-                                      horizontal: 1.5),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: th.playerColors[i],
-                                  ),
+                          children: [
+                            Container(
+                              width: 64,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                gradient: LinearGradient(colors: [
+                                  th.woodMid,
+                                  th.accent,
+                                ]),
+                                border: Border.all(
+                                  color: s.themeId == th.id
+                                      ? th.accentLight
+                                      : th.accent.withValues(alpha: 0.3),
+                                  width: s.themeId == th.id ? 3 : 1.5,
                                 ),
-                            ],
-                          ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                children: [
+                                  for (int i = 0; i < 2; i++)
+                                    Container(
+                                      width: 10,
+                                      height: 10,
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 1.5),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: th.playerColors[i],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (ParlorThemes.isProTheme(th.id) &&
+                                !s.isPro)
+                              Container(
+                                width: 64,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  borderRadius:
+                                      BorderRadius.circular(8),
+                                  color: Colors.black
+                                      .withValues(alpha: 0.55),
+                                ),
+                                child: Icon(Icons.lock,
+                                    color: t.accentLight, size: 18),
+                              ),
+                          ],
                         ),
                       ),
                   ],
@@ -199,10 +279,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         i++)
                       _MiniChip(
                         theme: t,
-                        label: TokenShapes.names[i],
+                        label:
+                            '${TokenShapes.isPro(i) && !s.isPro ? '🔒 ' : ''}${TokenShapes.names[i]}',
                         selected: s.tokenShape == i,
                         onTap: () async {
                           audio.click();
+                          if (TokenShapes.isPro(i) && !s.isPro) {
+                            await Navigator.of(context)
+                                .push(MaterialPageRoute(
+                              builder: (_) => ProScreen(
+                                audio: audio,
+                                settings: s,
+                                store: _store,
+                              ),
+                            ));
+                            return;
+                          }
                           await s.setTokenShape(i);
                         },
                       ),
@@ -217,10 +309,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     for (int i = 0; i < DiceStyles.names.length; i++)
                       _MiniChip(
                         theme: t,
-                        label: DiceStyles.names[i],
+                        label:
+                            '${DiceStyles.isPro(i) && !s.isPro ? '🔒 ' : ''}${DiceStyles.names[i]}',
                         selected: s.diceStyle == i,
                         onTap: () async {
                           audio.click();
+                          if (DiceStyles.isPro(i) && !s.isPro) {
+                            await Navigator.of(context)
+                                .push(MaterialPageRoute(
+                              builder: (_) => ProScreen(
+                                audio: audio,
+                                settings: s,
+                                store: _store,
+                              ),
+                            ));
+                            return;
+                          }
                           await s.setDiceStyle(i);
                         },
                       ),
@@ -245,33 +349,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 10),
-                      if (_tipJar.products.isEmpty)
-                        Text(
-                          _tipJar.error ?? 'Loading…',
-                          style: Parlor.body(13,
-                              theme: t,
-                              color:
-                                  t.ivory.withValues(alpha: 0.6)),
-                        )
-                      else
-                        Wrap(
+                      Builder(builder: (_) {
+                        final tips = [
+                          _store.coffeeProduct,
+                          _store.chocolateProduct,
+                        ].whereType<ProductDetails>().toList();
+                        if (!_store.storeReady) {
+                          return Text(
+                            _store.error ?? 'Loading…',
+                            style: Parlor.body(13,
+                                theme: t,
+                                color:
+                                    t.ivory.withValues(alpha: 0.6)),
+                            textAlign: TextAlign.center,
+                          );
+                        }
+                        if (tips.isEmpty) {
+                          return Text('Tips coming soon.',
+                              style: Parlor.body(13,
+                                  theme: t,
+                                  color: t.ivory
+                                      .withValues(alpha: 0.6)));
+                        }
+                        return Wrap(
                           spacing: 10,
                           alignment: WrapAlignment.center,
                           children: [
-                            for (final p in _tipJar.products)
+                            for (final p in tips)
                               _MiniChip(
                                 theme: t,
-                                label: p.id == TipJar.chocolateId
+                                label: p.id == StoreService.chocolateId
                                     ? '🍫 ${p.price}'
                                     : '☕ ${p.price}',
                                 selected: false,
                                 onTap: () {
                                   audio.click();
-                                  _tipJar.buy(p);
+                                  _store.buyTip(p);
                                 },
                               ),
                           ],
-                        ),
+                        );
+                      }),
                     ],
                   ),
                 ),

@@ -106,7 +106,9 @@ class LudoPlayer {
 enum BotDifficulty { easy, medium, hard }
 
 /// Turn phases owned entirely by the engine. The UI only renders.
-enum Phase { awaitingRoll, rolling, awaitingMove, animating, over }
+/// [settling] = turn is ending (no moves / forfeit): input locked, the turn
+/// will pass shortly. This is what makes tap-to-reroll impossible.
+enum Phase { awaitingRoll, rolling, awaitingMove, animating, settling, over }
 
 /// A token move in flight (visual). The logical move is applied at once;
 /// the UI interpolates the token from [fromStep] to [toStep].
@@ -132,13 +134,33 @@ class MoveAnim {
   }
 
   /// Interpolated step (fractional) for the UI to render.
+  ///
+  /// Square-by-square WALK: the piece hops onto each intermediate square in
+  /// turn (150–200ms per square) with an ease-out landing, so the user SEES
+  /// every step instead of one smooth glide.
   double get currentStep {
     final p = progress;
-    final eased = p < 0.5
-        ? 2 * p * p
-        : 1 - pow(-2 * p + 2, 2) / 2; // easeInOutQuad
     if (fromStep < 0) return toStep.toDouble(); // base exit: pop, no slide
-    return fromStep + (toStep - fromStep) * eased;
+    final total = (toStep - fromStep).abs();
+    if (total == 0) return toStep.toDouble();
+    final exact = (p * total).clamp(0.0, total.toDouble());
+    final idx = exact.floor().clamp(0, total - 1);
+    final frac = (exact - idx).clamp(0.0, 1.0);
+    // Per-square hop: fast lift, crisp ease-out landing on each square.
+    final eased = 1 - (1 - frac) * (1 - frac);
+    final dir = toStep >= fromStep ? 1 : -1;
+    return fromStep + dir * (idx + eased);
+  }
+
+  /// Fractional progress WITHIN the current square (0..1), for the UI's
+  /// per-square hop arc.
+  double get squareFrac {
+    if (fromStep < 0) return 0.0;
+    final total = (toStep - fromStep).abs();
+    if (total == 0) return 0.0;
+    final exact = (progress * total).clamp(0.0, total.toDouble());
+    final idx = exact.floor().clamp(0, total - 1);
+    return (exact - idx).clamp(0.0, 1.0);
   }
 }
 
@@ -162,6 +184,12 @@ class LudoEngine extends ChangeNotifier {
   int turnCount = 0;
   String banner = '';
   int lastRollBy = -1; // player index whose dice is showing the value
+
+  /// Strict one-roll-per-turn enforcement (RULES.md §3): a roll is GRANTED
+  /// when entering awaitingRoll and CONSUMED by _beginRoll. Any extra tap
+  /// while a roll is consumed (or while settling) is ignored — tap-to-reroll
+  /// is impossible by construction.
+  bool _rollConsumed = false;
 
   final _rand = Random();
   Timer? _timer; // single phase-transition timer
@@ -248,6 +276,9 @@ class LudoEngine extends ChangeNotifier {
       _arm(Duration(milliseconds: remain), _afterMoveAnim);
     } else if (phase == Phase.animating && moveAnim == null) {
       _afterMoveAnim();
+    } else if (phase == Phase.settling) {
+      // Settling with no timer (e.g. after backgrounding): pass the turn.
+      _nextTurn();
     }
   }
 
@@ -297,18 +328,20 @@ class LudoEngine extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------- turn flow
-  /// Human taps their dice.
+  /// Human taps their dice. Strict: exactly one roll per grant.
   void roll() {
-    if (!awaitingRoll || current.isBot) return;
+    if (!awaitingRoll || current.isBot || _rollConsumed) return;
     _beginRoll();
   }
 
   void _botRoll() {
-    if (!awaitingRoll || !current.isBot || over) return;
+    if (!awaitingRoll || !current.isBot || over || _rollConsumed) return;
     _beginRoll();
   }
 
   void _beginRoll() {
+    if (_rollConsumed) return; // belt-and-suspenders: never double-roll
+    _rollConsumed = true;
     phase = Phase.rolling;
     dice = 0;
     movable = [];
@@ -316,6 +349,14 @@ class LudoEngine extends ChangeNotifier {
     onEvent?.call(LudoEvent.diceRolling);
     notifyListeners();
     _arm(const Duration(milliseconds: rollDurationMs), _settleRoll);
+  }
+
+  /// Grant the current player a fresh roll (turn start or earned extra roll).
+  void _grantRoll() {
+    _rollConsumed = false;
+    phase = Phase.awaitingRoll;
+    notifyListeners();
+    _afterPhase();
   }
 
   /// Engine-owned settle — the UI never calls this. No desync possible.
@@ -331,7 +372,8 @@ class LudoEngine extends ChangeNotifier {
         banner = 'Three sixes! Turn forfeited.';
         dice = 0;
         movable = [];
-        phase = Phase.awaitingRoll;
+        // settling (NOT awaitingRoll): input locked, no tap-to-reroll.
+        phase = Phase.settling;
         notifyListeners();
         onEvent?.call(LudoEvent.turnForfeited);
         _arm(const Duration(milliseconds: 1200), _nextTurn);
@@ -343,8 +385,9 @@ class LudoEngine extends ChangeNotifier {
     movable = _movableTokens();
     if (movable.isEmpty) {
       // RULES §12: no legal moves → turn passes automatically.
+      // settling (NOT awaitingRoll): input locked during the pause.
       banner = 'No moves possible.';
-      phase = Phase.awaitingRoll;
+      phase = Phase.settling;
       notifyListeners();
       onEvent?.call(LudoEvent.noMoves);
       _arm(const Duration(milliseconds: 1100), _nextTurn);
@@ -470,10 +513,9 @@ class LudoEngine extends ChangeNotifier {
     }
     if (_lastWasExtra) {
       // Extra roll (6 / capture / token home): same player rolls again.
-      phase = Phase.awaitingRoll;
+      // Exactly ONE bonus roll is granted here — never more.
       banner = '${players[turn].name}, roll again!';
-      notifyListeners();
-      _afterPhase();
+      _grantRoll();
     } else {
       _nextTurn();
     }
@@ -484,12 +526,11 @@ class LudoEngine extends ChangeNotifier {
     turn = (turn + 1) % n;
     sixStreak = 0;
     turnCount++;
-    phase = Phase.awaitingRoll;
     banner = current.isBot
         ? '${current.name} is up…'
         : '${current.name}, tap the dice!';
-    notifyListeners();
-    _afterPhase();
+    // Fresh turn = fresh single roll grant.
+    _grantRoll();
   }
 
   /// Called whenever we enter awaitingRoll: bots roll themselves.
@@ -529,6 +570,7 @@ class LudoEngine extends ChangeNotifier {
     lastRollBy = -1;
     _lastWasExtra = false;
     _botMoving = false;
+    _rollConsumed = false; // fresh grant for the opening roll
     banner = current.isBot ? '${current.name} is up…' : 'Tap the dice, ${players[0].name}!';
     notifyListeners();
     _afterPhase();

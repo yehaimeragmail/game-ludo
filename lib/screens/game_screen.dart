@@ -37,7 +37,7 @@ class _GameScreenState extends State<GameScreen>
   bool _paused = false;
 
   LudoEngine get _e => widget.engine;
-  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId);
+  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId, custom: widget.settings.customTheme);
 
   @override
   void initState() {
@@ -142,7 +142,7 @@ class _GameScreenState extends State<GameScreen>
       _e.restart();
       widget.audio.startGameMusic();
     } else {
-      widget.audio.stopMusic();
+      // App-scoped music: keep playing; menu switches back to menu track.
       Navigator.of(context).pop();
     }
   }
@@ -296,7 +296,7 @@ class _GameScreenState extends State<GameScreen>
                   _e.restart();
                 },
                 onQuit: () {
-                  widget.audio.stopMusic();
+                  // App-scoped music keeps playing across screens.
                   Navigator.of(context).pop();
                 },
                 audio: widget.audio,
@@ -323,6 +323,8 @@ class _GameScreenState extends State<GameScreen>
             : 'Tap a glowing token!';
       case Phase.animating:
         return '';
+      case Phase.settling:
+        return engine.banner;
       case Phase.over:
         return '';
     }
@@ -609,6 +611,24 @@ class _RollingDiceState extends State<_RollingDice> {
         bg1 = const Color(0xFF6E4520);
         pip = const Color(0xFF2E1A0C);
         edge = const Color(0xFF4A2E14);
+        break;
+      case 3: // Marble Vein
+        bg0 = const Color(0xFFF4F6F8);
+        bg1 = const Color(0xFFC9D2DA);
+        pip = const Color(0xFF3A4A5A);
+        edge = const Color(0xFF8A9AAC);
+        break;
+      case 4: // Obsidian
+        bg0 = const Color(0xFF2A2A32);
+        bg1 = const Color(0xFF0E0E12);
+        pip = const Color(0xFFE8ECF5);
+        edge = const Color(0xFF5A5A6A);
+        break;
+      case 5: // Copper Rose
+        bg0 = const Color(0xFFB8735A);
+        bg1 = const Color(0xFF7E4A38);
+        pip = const Color(0xFF2E1A14);
+        edge = const Color(0xFF5E3428);
         break;
       default: // Ivory Classic
         bg0 = const Color(0xFFFFFBF0);
@@ -1140,10 +1160,11 @@ class _ParlorBoardPainter extends CustomPainter {
         Offset off;
         double lift = 0;
         if (anim != null && anim.pi == i && anim.ti == k) {
-          // Interpolated flight path with a little hop.
+          // Square-by-square WALK: the piece hops onto each square in turn.
           final step = anim.currentStep;
           off = tokenUnitsAt(engine.seats, i, k, step);
-          lift = sin(animProgress * pi) * 0.35;
+          // Per-square parabolic hop — highly visible landing on every box.
+          lift = sin(anim.squareFrac * pi) * 0.5;
           if (anim.fromStep < 0) {
             // Base exit: slide from well to start square.
             final a = tokenUnitsAt(engine.seats, i, k, -1);
@@ -1303,6 +1324,248 @@ class _ParlorBoardPainter extends CustomPainter {
               ..style = PaintingStyle.stroke
               ..strokeWidth = 1.6
               ..color = Colors.black.withValues(alpha: 0.4));
+        break;
+      case 4: // Star — five-point parlor star.
+        final starPath = Path();
+        for (int i = 0; i < 10; i++) {
+          final rr = (i % 2 == 0) ? rad * 1.12 : rad * 0.48;
+          final a = -pi / 2 + i * pi / 5;
+          final px = ctr.dx + rr * cos(a);
+          final py = ctr.dy + rr * sin(a);
+          if (i == 0) {
+            starPath.moveTo(px, py);
+          } else {
+            starPath.lineTo(px, py);
+          }
+        }
+        starPath.close();
+        canvas.drawPath(starPath, Paint()..color = color);
+        canvas.drawPath(
+            starPath,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.black.withValues(alpha: 0.45));
+        canvas.drawCircle(
+            ctr + Offset(-rad * 0.15, -rad * 0.18),
+            rad * 0.16,
+            Paint()..color = Colors.white.withValues(alpha: 0.7));
+        break;
+      case 5: // Crown — jeweled crown token.
+        final crown = Path()
+          ..moveTo(ctr.dx - rad * 0.95, ctr.dy + rad * 0.75)
+          ..lineTo(ctr.dx - rad * 0.95, ctr.dy - rad * 0.25)
+          ..lineTo(ctr.dx - rad * 0.48, ctr.dy + rad * 0.12)
+          ..lineTo(ctr.dx, ctr.dy - rad * 0.72)
+          ..lineTo(ctr.dx + rad * 0.48, ctr.dy + rad * 0.12)
+          ..lineTo(ctr.dx + rad * 0.95, ctr.dy - rad * 0.25)
+          ..lineTo(ctr.dx + rad * 0.95, ctr.dy + rad * 0.75)
+          ..close();
+        canvas.drawPath(crown, Paint()..color = color);
+        // base band
+        canvas.drawRect(
+            Rect.fromLTWH(ctr.dx - rad * 0.95, ctr.dy + rad * 0.45,
+                rad * 1.9, rad * 0.3),
+            Paint()..color = t.accentDark);
+        // jewels
+        for (final jx in [-0.48, 0.0, 0.48]) {
+          canvas.drawCircle(
+              Offset(ctr.dx + rad * jx, ctr.dy + rad * 0.1),
+              rad * 0.14,
+              Paint()..color = Colors.white.withValues(alpha: 0.85));
+        }
+        canvas.drawPath(
+            crown,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.black.withValues(alpha: 0.45));
+        break;
+      case 6: // Shield — heraldic enamel shield.
+        final shield = Path()
+          ..moveTo(ctr.dx - rad * 0.85, ctr.dy - rad * 0.72)
+          ..lineTo(ctr.dx + rad * 0.85, ctr.dy - rad * 0.72)
+          ..lineTo(ctr.dx + rad * 0.85, ctr.dy + rad * 0.08)
+          ..quadraticBezierTo(ctr.dx + rad * 0.85, ctr.dy + rad * 0.72,
+              ctr.dx, ctr.dy + rad * 1.02)
+          ..quadraticBezierTo(ctr.dx - rad * 0.85, ctr.dy + rad * 0.72,
+              ctr.dx - rad * 0.85, ctr.dy + rad * 0.08)
+          ..close();
+        canvas.drawPath(shield, Paint()..color = color);
+        // pale center stripe
+        final stripe = Path()
+          ..moveTo(ctr.dx - rad * 0.22, ctr.dy - rad * 0.72)
+          ..lineTo(ctr.dx + rad * 0.22, ctr.dy - rad * 0.72)
+          ..lineTo(ctr.dx + rad * 0.22, ctr.dy + rad * 0.35)
+          ..lineTo(ctr.dx, ctr.dy + rad * 0.62)
+          ..lineTo(ctr.dx - rad * 0.22, ctr.dy + rad * 0.35)
+          ..close();
+        canvas.drawPath(
+            stripe, Paint()..color = Colors.white.withValues(alpha: 0.35));
+        canvas.drawPath(
+            shield,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.2
+              ..color = t.accentDark);
+        break;
+      case 7: // Dice Cube — mini die in your color.
+        final cube = RRect.fromRectAndRadius(
+            Rect.fromCircle(center: ctr, radius: rad * 0.95),
+            Radius.circular(rad * 0.28));
+        canvas.drawRRect(
+            cube,
+            Paint()
+              ..shader = LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [color, t.woodDeep],
+              ).createShader(cube.outerRect));
+        // fixed five-pip face
+        for (final pp in [
+          [-0.4, -0.4],
+          [0.4, -0.4],
+          [0.0, 0.0],
+          [-0.4, 0.4],
+          [0.4, 0.4]
+        ]) {
+          canvas.drawCircle(
+              Offset(ctr.dx + rad * pp[0], ctr.dy + rad * pp[1]),
+              rad * 0.13,
+              Paint()..color = Colors.white.withValues(alpha: 0.92));
+        }
+        canvas.drawRRect(
+            cube,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.black.withValues(alpha: 0.5));
+        break;
+      case 8: // Flower — six wooden petals.
+        for (int i = 0; i < 6; i++) {
+          final a = i * pi / 3;
+          canvas.drawCircle(
+              Offset(ctr.dx + rad * 0.52 * cos(a),
+                  ctr.dy + rad * 0.52 * sin(a)),
+              rad * 0.42,
+              Paint()..color = color);
+        }
+        canvas.drawCircle(
+            ctr, rad * 0.4, Paint()..color = t.accentLight);
+        canvas.drawCircle(
+            ctr,
+            rad * 0.4,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6
+              ..color = t.accentDark);
+        canvas.drawCircle(
+            ctr + Offset(-rad * 0.12, -rad * 0.14),
+            rad * 0.12,
+            Paint()..color = Colors.white.withValues(alpha: 0.8));
+        break;
+      case 9: // Shell — scallop carving.
+        final shell = Path()
+          ..moveTo(ctr.dx, ctr.dy + rad * 0.9)
+          ..quadraticBezierTo(ctr.dx - rad * 1.05, ctr.dy + rad * 0.25,
+              ctr.dx - rad * 0.8, ctr.dy - rad * 0.55)
+          ..quadraticBezierTo(ctr.dx - rad * 0.4, ctr.dy - rad * 0.95,
+              ctr.dx, ctr.dy - rad * 0.95)
+          ..quadraticBezierTo(ctr.dx + rad * 0.4, ctr.dy - rad * 0.95,
+              ctr.dx + rad * 0.8, ctr.dy - rad * 0.55)
+          ..quadraticBezierTo(ctr.dx + rad * 1.05, ctr.dy + rad * 0.25,
+              ctr.dx, ctr.dy + rad * 0.9)
+          ..close();
+        canvas.drawPath(shell, Paint()..color = color);
+        // ridges fanning from the hinge
+        for (final ra in [-0.5, -0.25, 0.0, 0.25, 0.5]) {
+          canvas.drawLine(
+              Offset(ctr.dx, ctr.dy + rad * 0.9),
+              Offset(ctr.dx + rad * 1.6 * sin(ra),
+                  ctr.dy + rad * 0.9 - rad * 1.7 * cos(ra)),
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1.4
+                ..color = Colors.white.withValues(alpha: 0.4));
+        }
+        canvas.drawPath(
+            shell,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.black.withValues(alpha: 0.45));
+        break;
+      case 10: // Coin — minted brass coin.
+        canvas.drawCircle(ctr, rad, Paint()..color = t.accent);
+        canvas.drawCircle(
+            ctr, rad * 0.78, Paint()..color = t.accentDark);
+        canvas.drawCircle(
+            ctr,
+            rad * 0.78,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6
+              ..color = t.accentLight.withValues(alpha: 0.8));
+        // embossed star
+        final cstar = Path();
+        for (int i = 0; i < 10; i++) {
+          final rr = (i % 2 == 0) ? rad * 0.42 : rad * 0.18;
+          final a = -pi / 2 + i * pi / 5;
+          final px = ctr.dx + rr * cos(a);
+          final py = ctr.dy + rr * sin(a);
+          if (i == 0) {
+            cstar.moveTo(px, py);
+          } else {
+            cstar.lineTo(px, py);
+          }
+        }
+        cstar.close();
+        canvas.drawPath(
+            cstar, Paint()..color = t.accentLight.withValues(alpha: 0.9));
+        // player color dot at the rim
+        canvas.drawCircle(
+            Offset(ctr.dx, ctr.dy - rad * 0.62),
+            rad * 0.16,
+            Paint()..color = color);
+        break;
+      case 11: // Pawn — classic silhouette.
+        // head
+        canvas.drawCircle(
+            Offset(ctr.dx, ctr.dy - rad * 0.55),
+            rad * 0.42,
+            Paint()..color = color);
+        // collar
+        canvas.drawRRect(
+            RRect.fromRectAndRadius(
+                Rect.fromCenter(
+                    center: Offset(ctr.dx, ctr.dy - rad * 0.05),
+                    width: rad * 1.0,
+                    height: rad * 0.28),
+                Radius.circular(rad * 0.14)),
+            Paint()..color = color);
+        // body
+        final body = Path()
+          ..moveTo(ctr.dx - rad * 0.42, ctr.dy + rad * 0.08)
+          ..quadraticBezierTo(ctr.dx - rad * 0.5, ctr.dy + rad * 0.7,
+              ctr.dx - rad * 0.72, ctr.dy + rad * 0.85)
+          ..lineTo(ctr.dx + rad * 0.72, ctr.dy + rad * 0.85)
+          ..quadraticBezierTo(ctr.dx + rad * 0.5, ctr.dy + rad * 0.7,
+              ctr.dx + rad * 0.42, ctr.dy + rad * 0.08)
+          ..close();
+        canvas.drawPath(body, Paint()..color = color);
+        // sheen
+        canvas.drawCircle(
+            Offset(ctr.dx - rad * 0.18, ctr.dy - rad * 0.68),
+            rad * 0.12,
+            Paint()..color = Colors.white.withValues(alpha: 0.7));
+        // outline
+        final outline = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.8
+          ..color = Colors.black.withValues(alpha: 0.5);
+        canvas.drawCircle(
+            Offset(ctr.dx, ctr.dy - rad * 0.55), rad * 0.42, outline);
+        canvas.drawPath(body, outline);
         break;
       default: // Royal Orb — glossy lacquered pawn orb.
         final bodyRect = Rect.fromCircle(center: ctr, radius: rad);

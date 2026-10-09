@@ -205,4 +205,66 @@ void main() {
     expect(e.steps[0][0], 13);
     expect(e.steps[1][0], 39); // safe: no capture
   });
+
+  test('No tap-to-reroll during settling (no-moves pause)', () async {
+    final e = makeEngine();
+    addTearDown(e.dispose);
+    await rollForced(e, 4); // all in base, not a 6 → no moves
+    expect(e.phase, Phase.settling);
+    // Tapping the dice during the pause must be ignored.
+    e.roll();
+    e.roll();
+    expect(e.phase, Phase.settling);
+    expect(e.dice, 0);
+    await Future.delayed(const Duration(milliseconds: 1400));
+    expect(e.turn, 1); // turn passed exactly once
+    expect(e.phase, Phase.awaitingRoll);
+  });
+
+  test('Strict one roll per turn: second tap before moving is ignored', () async {
+    final e = makeEngine();
+    addTearDown(e.dispose);
+    e.steps[0][0] = 0;
+    await rollForced(e, 3);
+    expect(e.phase, Phase.awaitingMove);
+    final diceBefore = e.dice;
+    // Extra taps must not re-roll.
+    e.roll();
+    expect(e.dice, diceBefore);
+    expect(e.phase, Phase.awaitingMove);
+    e.moveToken(0);
+    await waitAnim(e);
+    expect(e.steps[0][0], 3);
+    expect(e.turn, 1); // non-6 move: turn passes, no bonus roll
+  });
+
+  test('Three sixes: reroll taps during forfeit pause are ignored', () async {
+    final e = makeEngine();
+    addTearDown(e.dispose);
+    for (int r = 0; r < 2; r++) {
+      await rollForced(e, 6);
+      e.moveToken(e.movable.first);
+      await waitAnim(e);
+    }
+    await rollForced(e, 6); // third six → forfeit
+    expect(e.phase, Phase.settling);
+    e.roll(); // must be ignored
+    expect(e.phase, Phase.settling);
+    await Future.delayed(const Duration(milliseconds: 1500));
+    expect(e.turn, 1);
+  });
+
+  test('MoveAnim walks square-by-square with per-square hop', () async {
+    final anim = MoveAnim(pi: 0, ti: 0, fromStep: 0, toStep: 6, totalMs: 6000);
+    // At ~half the duration the piece must be mid-board, not teleported.
+    await Future.delayed(const Duration(milliseconds: 3100));
+    final mid = anim.currentStep;
+    expect(mid, greaterThan(1.5));
+    expect(mid, lessThan(5.0));
+    expect(anim.squareFrac, greaterThanOrEqualTo(0.0));
+    expect(anim.squareFrac, lessThanOrEqualTo(1.0));
+    // Monotonic: later reads never go backwards.
+    final later = anim.currentStep;
+    expect(later, greaterThanOrEqualTo(mid - 0.05));
+  });
 }

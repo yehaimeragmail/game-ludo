@@ -40,6 +40,14 @@ class ParlorThemeDef {
 }
 
 class ParlorThemes {
+  /// First 4 are the FREE starter themes. The rest are PRO.
+  static const List<String> freeThemeIds = [
+    'classic',
+    'mahogany',
+    'midnight',
+    'emerald',
+  ];
+
   static const List<ParlorThemeDef> all = [
     ParlorThemeDef(
       id: 'classic',
@@ -209,29 +217,369 @@ class ParlorThemes {
       ],
       playerColorNames: ['Brick', 'River', 'Ember', 'Hay'],
     ),
+    ParlorThemeDef(
+      id: 'crimson',
+      name: 'Crimson Study',
+      woodDark: Color(0xFF4A1420),
+      woodMid: Color(0xFF6E2230),
+      woodDeep: Color(0xFF2A0A12),
+      accent: Color(0xFFD4AF37),
+      accentLight: Color(0xFFF3DC8E),
+      accentDark: Color(0xFF96702A),
+      ivory: Color(0xFFF8F1E2),
+      felt: Color(0xFF5A1A26),
+      trackLight: Color(0xFFF2E4CE),
+      trackDark: Color(0xFFE6CFA8),
+      playerColors: [
+        Color(0xFFD4AC0D),
+        Color(0xFF7D3C98),
+        Color(0xFF1E8449),
+        Color(0xFF2471A3),
+      ],
+      playerColorNames: ['Topaz', 'Amethyst', 'Jade', 'Teal'],
+    ),
+    ParlorThemeDef(
+      id: 'sapphire',
+      name: 'Sapphire Den',
+      woodDark: Color(0xFF16233F),
+      woodMid: Color(0xFF24365C),
+      woodDeep: Color(0xFF0C1526),
+      accent: Color(0xFFC0C6D4),
+      accentLight: Color(0xFFE8ECF5),
+      accentDark: Color(0xFF7E8698),
+      ivory: Color(0xFFF2EEE4),
+      felt: Color(0xFF1E3A5F),
+      trackLight: Color(0xFFE9E6D4),
+      trackDark: Color(0xFFD5D0B0),
+      playerColors: [
+        Color(0xFFC0392B),
+        Color(0xFFD4AC0D),
+        Color(0xFF229954),
+        Color(0xFFE67E22),
+      ],
+      playerColorNames: ['Poppy', 'Wheat', 'Moss', 'Ember'],
+    ),
+    ParlorThemeDef(
+      id: 'goldenoak',
+      name: 'Golden Oak',
+      woodDark: Color(0xFF7A5A24),
+      woodMid: Color(0xFF9A7534),
+      woodDeep: Color(0xFF4A3614),
+      accent: Color(0xFF8C6A2F),
+      accentLight: Color(0xFFD4A94E),
+      accentDark: Color(0xFF5F471E),
+      ivory: Color(0xFF2E2118),
+      felt: Color(0xFF4A5A2A),
+      trackLight: Color(0xFFF7EBD0),
+      trackDark: Color(0xFFEAD6A8),
+      playerColors: [
+        Color(0xFFA31621),
+        Color(0xFF1D4E9E),
+        Color(0xFF1B7A4D),
+        Color(0xFF6E2C00),
+      ],
+      playerColorNames: ['Ruby', 'Sapphire', 'Emerald', 'Cocoa'],
+    ),
+    ParlorThemeDef(
+      id: 'rosewood',
+      name: 'Rosewood',
+      woodDark: Color(0xFF3F1D24),
+      woodMid: Color(0xFF5E2C36),
+      woodDeep: Color(0xFF241016),
+      accent: Color(0xFFB87333),
+      accentLight: Color(0xFFE09E5A),
+      accentDark: Color(0xFF7E4F22),
+      ivory: Color(0xFFF5EFE0),
+      felt: Color(0xFF4A2430),
+      trackLight: Color(0xFFEFE0C6),
+      trackDark: Color(0xFFE2C69E),
+      playerColors: [
+        Color(0xFFD4AC0D),
+        Color(0xFF2E86C1),
+        Color(0xFF229954),
+        Color(0xFFAF601A),
+      ],
+      playerColorNames: ['Wheat', 'Steel', 'Leaf', 'Caramel'],
+    ),
+    ParlorThemeDef(
+      id: 'ebony',
+      name: 'Ebony & Silver',
+      woodDark: Color(0xFF1A1A1E),
+      woodMid: Color(0xFF2A2A30),
+      woodDeep: Color(0xFF0C0C0E),
+      accent: Color(0xFFC0C6D4),
+      accentLight: Color(0xFFF0F2F8),
+      accentDark: Color(0xFF7E8698),
+      ivory: Color(0xFFF2EEE4),
+      felt: Color(0xFF2A2A34),
+      trackLight: Color(0xFFE8E4D4),
+      trackDark: Color(0xFFD0CAB2),
+      playerColors: [
+        Color(0xFFE74C3C),
+        Color(0xFF3498DB),
+        Color(0xFF2ECC71),
+        Color(0xFFF39C12),
+      ],
+      playerColorNames: ['Flame', 'Sky', 'Mint', 'Gold'],
+    ),
+    ParlorThemeDef(
+      id: 'teal',
+      name: 'Teal Atelier',
+      woodDark: Color(0xFF1E3A38),
+      woodMid: Color(0xFF2E5654),
+      woodDeep: Color(0xFF10201F),
+      accent: Color(0xFFC9A227),
+      accentLight: Color(0xFFE8CE7A),
+      accentDark: Color(0xFF8A6D1A),
+      ivory: Color(0xFFF0EDE2),
+      felt: Color(0xFF0F3D3A),
+      trackLight: Color(0xFFEAE4CC),
+      trackDark: Color(0xFFD8CCA4),
+      playerColors: [
+        Color(0xFFC0392B),
+        Color(0xFFD4AC0D),
+        Color(0xFF8E44AD),
+        Color(0xFFE67E22),
+      ],
+      playerColorNames: ['Poppy', 'Wheat', 'Plum', 'Ember'],
+    ),
+    ParlorThemeDef(
+      id: 'burgundy',
+      name: 'Burgundy Velvet',
+      woodDark: Color(0xFF3A1A2E),
+      woodMid: Color(0xFF552842),
+      woodDeep: Color(0xFF200E18),
+      accent: Color(0xFFD4AF37),
+      accentLight: Color(0xFFF3DC8E),
+      accentDark: Color(0xFF96702A),
+      ivory: Color(0xFFF8F1E2),
+      felt: Color(0xFF4A1A38),
+      trackLight: Color(0xFFF0E2CE),
+      trackDark: Color(0xFFE4CAA6),
+      playerColors: [
+        Color(0xFFD4AC0D),
+        Color(0xFF2E86C1),
+        Color(0xFF229954),
+        Color(0xFFCA6F1E),
+      ],
+      playerColorNames: ['Wheat', 'Steel', 'Leaf', 'Amber'],
+    ),
+    ParlorThemeDef(
+      id: 'sandalwood',
+      name: 'Sandalwood',
+      woodDark: Color(0xFF8A6A42),
+      woodMid: Color(0xFFAA8757),
+      woodDeep: Color(0xFF54402A),
+      accent: Color(0xFF7A5A2E),
+      accentLight: Color(0xFFC49A5A),
+      accentDark: Color(0xFF54401E),
+      ivory: Color(0xFF2E2118),
+      felt: Color(0xFF5A6E3A),
+      trackLight: Color(0xFFF8ECD2),
+      trackDark: Color(0xFFECD8AA),
+      playerColors: [
+        Color(0xFF922B21),
+        Color(0xFF1A5276),
+        Color(0xFF1E8449),
+        Color(0xFF7E5109),
+      ],
+      playerColorNames: ['Oxblood', 'Navy', 'Forest', 'Brass'],
+    ),
+    ParlorThemeDef(
+      id: 'slate',
+      name: 'Slate & Brass',
+      woodDark: Color(0xFF2E3440),
+      woodMid: Color(0xFF434C5E),
+      woodDeep: Color(0xFF1A1E26),
+      accent: Color(0xFFC9A227),
+      accentLight: Color(0xFFE8CE7A),
+      accentDark: Color(0xFF8A6D1A),
+      ivory: Color(0xFFECEFF4),
+      felt: Color(0xFF3B4252),
+      trackLight: Color(0xFFE5E9F0),
+      trackDark: Color(0xFFD8DEE9),
+      playerColors: [
+        Color(0xFFBF616A),
+        Color(0xFF5E81AC),
+        Color(0xFFA3BE8C),
+        Color(0xFFEBCB8B),
+      ],
+      playerColorNames: ['Aurora', 'Frost', 'Sage', 'Nord'],
+    ),
+    ParlorThemeDef(
+      id: 'olive',
+      name: 'Olive Grove',
+      woodDark: Color(0xFF3F4226),
+      woodMid: Color(0xFF5E6238),
+      woodDeep: Color(0xFF242614),
+      accent: Color(0xFFC9A227),
+      accentLight: Color(0xFFE8CE7A),
+      accentDark: Color(0xFF8A6D1A),
+      ivory: Color(0xFFF1EAD8),
+      felt: Color(0xFF4A5228),
+      trackLight: Color(0xFFEDE4C6),
+      trackDark: Color(0xFFDFD0A0),
+      playerColors: [
+        Color(0xFFB03A2E),
+        Color(0xFF2E86C1),
+        Color(0xFFD4AC0D),
+        Color(0xFF935116),
+      ],
+      playerColorNames: ['Brick', 'River', 'Wheat', 'Umber'],
+    ),
+    ParlorThemeDef(
+      id: 'porcelain',
+      name: 'Porcelain Parlor',
+      woodDark: Color(0xFFE8E0D0),
+      woodMid: Color(0xFFF2EAD8),
+      woodDeep: Color(0xFFCFC2A8),
+      accent: Color(0xFF2E5A88),
+      accentLight: Color(0xFF5E8AC0),
+      accentDark: Color(0xFF1E3A5C),
+      ivory: Color(0xFF2A2118),
+      felt: Color(0xFFDCE8F0),
+      trackLight: Color(0xFFFFFFFF),
+      trackDark: Color(0xFFF0EAD8),
+      playerColors: [
+        Color(0xFFC0392B),
+        Color(0xFF1D4E9E),
+        Color(0xFF1B7A4D),
+        Color(0xFF8E44AD),
+      ],
+      playerColorNames: ['Cinnabar', 'Cobalt', 'Celadon', 'Plum'],
+    ),
+    ParlorThemeDef(
+      id: 'charcoal',
+      name: 'Charcoal Club',
+      woodDark: Color(0xFF242424),
+      woodMid: Color(0xFF383838),
+      woodDeep: Color(0xFF121212),
+      accent: Color(0xFFB87333),
+      accentLight: Color(0xFFE09E5A),
+      accentDark: Color(0xFF7E4F22),
+      ivory: Color(0xFFF0EBE0),
+      felt: Color(0xFF33302A),
+      trackLight: Color(0xFFE8E0D0),
+      trackDark: Color(0xFFD0C4AC),
+      playerColors: [
+        Color(0xFFE74C3C),
+        Color(0xFF5DADE2),
+        Color(0xFF58D68D),
+        Color(0xFFF5B041),
+      ],
+      playerColorNames: ['Ember', 'Glacier', 'Jade', 'Honey'],
+    ),
+    ParlorThemeDef(
+      id: 'honeymaple',
+      name: 'Honey Maple',
+      woodDark: Color(0xFF9A6E34),
+      woodMid: Color(0xFFB8894A),
+      woodDeep: Color(0xFF5E421E),
+      accent: Color(0xFF6E4A1E),
+      accentLight: Color(0xFFB98A4A),
+      accentDark: Color(0xFF4A3012),
+      ivory: Color(0xFF2E2118),
+      felt: Color(0xFF6E7E3A),
+      trackLight: Color(0xFFFAEED4),
+      trackDark: Color(0xFFF0DCAC),
+      playerColors: [
+        Color(0xFF922B21),
+        Color(0xFF1A5276),
+        Color(0xFF1E8449),
+        Color(0xFF7D3C98),
+      ],
+      playerColorNames: ['Oxblood', 'Deepsea', 'Pine', 'Grape'],
+    ),
+    ParlorThemeDef(
+      id: 'winecellar',
+      name: 'Wine Cellar',
+      woodDark: Color(0xFF2E1A2E),
+      woodMid: Color(0xFF462844),
+      woodDeep: Color(0xFF180E18),
+      accent: Color(0xFFC9A227),
+      accentLight: Color(0xFFE8CE7A),
+      accentDark: Color(0xFF8A6D1A),
+      ivory: Color(0xFFF5EFE0),
+      felt: Color(0xFF3E1E3E),
+      trackLight: Color(0xFFEFE2CE),
+      trackDark: Color(0xFFE2CAA6),
+      playerColors: [
+        Color(0xFFD4AC0D),
+        Color(0xFF5DADE2),
+        Color(0xFF58D68D),
+        Color(0xFFEC7063),
+      ],
+      playerColorNames: ['Sauternes', 'Mist', 'Verde', 'Rosé'],
+    ),
   ];
 
-  static ParlorThemeDef byId(String id) =>
-      all.firstWhere((t) => t.id == id, orElse: () => all.first);
+  static ParlorThemeDef byId(String id, {ParlorThemeDef? custom}) {
+    if (id == 'custom') {
+      return custom ?? all.first;
+    }
+    return all.firstWhere((t) => t.id == id, orElse: () => all.first);
+  }
+
+  static bool isProTheme(String id) =>
+      !freeThemeIds.contains(id) && id != 'custom';
 }
 
-/// Token piece styles. 0 = Royal Orb, 1 = Facet Gem, 2 = Wood Disc, 3 = Marble.
+/// Token piece styles. 0-3 = FREE, 4+ = PRO.
 class TokenShapes {
-  static const names = ['Royal Orb', 'Facet Gem', 'Wood Disc', 'Marble'];
+  static const names = [
+    'Royal Orb',
+    'Facet Gem',
+    'Wood Disc',
+    'Marble',
+    'Star',
+    'Crown',
+    'Shield',
+    'Dice Cube',
+    'Flower',
+    'Shell',
+    'Coin',
+    'Pawn',
+  ];
   static const descriptions = [
     'Glossy lacquered pawn orb',
     'Cut-gemstone token',
     'Turned wooden disc',
     'Swirled glass marble',
+    'Five-point brass star',
+    'Jeweled crown token',
+    'Enamel heraldic shield',
+    'Mini die in your color',
+    'Six-petal wooden flower',
+    'Scallop shell carving',
+    'Minted brass coin',
+    'Classic pawn silhouette',
   ];
+
+  /// Indices free players may use.
+  static const freeCount = 4;
+  static bool isPro(int index) => index >= freeCount;
 }
 
-/// Dice styles. 0 = Ivory Classic, 1 = Brass Noble, 2 = Oak.
+/// Dice styles. 0-1 = FREE, 2+ = PRO.
 class DiceStyles {
-  static const names = ['Ivory Classic', 'Brass Noble', 'Oak'];
+  static const names = [
+    'Ivory Classic',
+    'Brass Noble',
+    'Oak',
+    'Marble Vein',
+    'Obsidian',
+    'Copper Rose',
+  ];
   static const descriptions = [
     'Cold-cast ivory, engraved pips',
     'Dark bronze die, brass pips',
     'Oiled oak die, burned pips',
+    'White marble, slate veins',
+    'Black glass, silver pips',
+    'Rose copper, dark pips',
   ];
+
+  /// Styles free players may use.
+  static const freeCount = 2;
+  static bool isPro(int index) => index >= freeCount;
 }
