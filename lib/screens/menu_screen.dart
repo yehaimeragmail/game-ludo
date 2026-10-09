@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_review/in_app_review.dart';
+import 'package:share_plus/share_plus.dart';
 import '../engine/ludo_engine.dart';
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
@@ -69,6 +71,21 @@ class _MenuScreenState extends State<MenuScreen> {
     _store.proPurchased.removeListener(_onPro);
     _store.dispose();
     super.dispose();
+  }
+
+  /// Real in-app review flow: the Play in-app review sheet when available,
+  /// otherwise fall back to opening the store listing. No fake dialogs.
+  Future<void> _requestReview() async {
+    final review = InAppReview.instance;
+    try {
+      if (await review.isAvailable()) {
+        await review.requestReview();
+      } else {
+        await review.openStoreListing(appStoreId: null);
+      }
+    } catch (_) {
+      // Review UI unavailable on this device/build: stay silent, no fake UI.
+    }
   }
 
   void _play() {
@@ -196,6 +213,28 @@ class _MenuScreenState extends State<MenuScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      _MenuIcon(
+                        theme: t,
+                        icon: Icons.share,
+                        label: 'Share',
+                        onTap: () async {
+                          widget.audio.click();
+                          // ignore: deprecated_member_use
+                          await Share.share(
+                              'Play Ludo with me! https://play.google.com/store/apps/details?id=com.gameswajiha.ludo');
+                        },
+                      ),
+                      const SizedBox(width: 22),
+                      _MenuIcon(
+                        theme: t,
+                        icon: Icons.star_rate,
+                        label: 'Rate',
+                        onTap: () async {
+                          widget.audio.click();
+                          await _requestReview();
+                        },
+                      ),
+                      const SizedBox(width: 22),
                       _MenuIcon(
                         theme: t,
                         icon: Icons.settings,

@@ -64,11 +64,8 @@ class StoreService {
         return;
       }
       products = resp.productDetails;
-      if (resp.notFoundIDs.isNotEmpty) {
-        // Products not created in Play Console yet — normal before launch.
-        error = 'Available after store setup';
-        return;
-      }
+      // Products not yet created in Play Console simply don't appear here;
+      // whatever IS queryable is buyable. Fully empty = pre-launch state.
       storeReady = products.isNotEmpty;
       if (!storeReady) error = 'Available after store setup';
     } catch (_) {

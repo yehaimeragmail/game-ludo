@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,7 +16,12 @@ class ParlorSettings extends ChangeNotifier {
   static const _kPlayers = 'ludo_player_count';
   static const _kBots = 'ludo_bot_count';
   static const _kDifficulty = 'ludo_bot_difficulty'; // 0 easy, 1 medium, 2 hard
-  static const _kNames = 'ludo_player_names'; // StringList, 4 entries
+  static const _kNames = 'ludo_player_names'; // legacy unordered StringSet key
+  /// Order-safe player-name storage: a single JSON string. Android's
+  /// SharedPreferences stores StringLists as an unordered StringSet, so the
+  /// old key scrambled name order on every app restart. Never use a
+  /// StringList for ordered data on Android.
+  static const _kNamesJson = 'ludo_player_names_json';
   static const _kTheme = 'ludo_theme_id';
   static const _kTokenShape = 'ludo_token_shape';
   static const _kDiceStyle = 'ludo_dice_style';
@@ -26,6 +32,26 @@ class ParlorSettings extends ChangeNotifier {
   static const _kCustomPrefix = 'ludo_custom_';
 
   static const defaultNames = ['Ruby', 'Sapphire', 'Emerald', 'Amber'];
+
+  /// Encode the 4 player names as one JSON string (order-preserving).
+  static String encodePlayerNames(List<String> names) => jsonEncode(names);
+
+  static String _cleanName(int i, Object? v) {
+    final s = v is String ? v.trim() : '';
+    return s.isEmpty ? defaultNames[i] : s;
+  }
+
+  /// Decode persisted names; falls back to defaults on missing/corrupt data.
+  static List<String> decodePlayerNames(String? raw) {
+    if (raw == null) return List.of(defaultNames);
+    try {
+      final d = jsonDecode(raw);
+      if (d is List && d.length == 4) {
+        return [for (int i = 0; i < 4; i++) _cleanName(i, d[i])];
+      }
+    } catch (_) {}
+    return List.of(defaultNames);
+  }
 
   bool musicOn = true;
   bool sfxOn = true;
@@ -94,12 +120,17 @@ class ParlorSettings extends ChangeNotifier {
     playerCount = (p.getInt(_kPlayers) ?? 2).clamp(2, 4);
     botCount = (p.getInt(_kBots) ?? 1).clamp(0, 3);
     difficulty = (p.getInt(_kDifficulty) ?? 1).clamp(0, 2);
-    final names = p.getStringList(_kNames);
-    if (names != null && names.length == 4) {
-      playerNames = [
-        for (int i = 0; i < 4; i++)
-          names[i].trim().isEmpty ? defaultNames[i] : names[i].trim()
-      ];
+    // Player names: prefer the order-safe JSON key. Fall back to the legacy
+    // StringList key once (one-time migration); it may already be scrambled
+    // on Android, which is exactly the bug this replaces.
+    final namesRaw = p.getString(_kNamesJson);
+    if (namesRaw != null) {
+      playerNames = decodePlayerNames(namesRaw);
+    } else {
+      final legacy = p.getStringList(_kNames);
+      playerNames = (legacy != null && legacy.length == 4)
+          ? [for (int i = 0; i < 4; i++) _cleanName(i, legacy[i])]
+          : List.of(defaultNames);
     }
     themeId = p.getString(_kTheme) ?? 'classic';
     tokenShape = (p.getInt(_kTokenShape) ?? 0).clamp(0, 11);
@@ -125,7 +156,8 @@ class ParlorSettings extends ChangeNotifier {
     await p.setInt(_kPlayers, playerCount);
     await p.setInt(_kBots, botCount);
     await p.setInt(_kDifficulty, difficulty);
-    await p.setStringList(_kNames, playerNames);
+    await p.setString(_kNamesJson, encodePlayerNames(playerNames));
+    await p.remove(_kNames); // drop the legacy unordered key for good
     await p.setString(_kTheme, themeId);
     await p.setInt(_kTokenShape, tokenShape);
     await p.setInt(_kDiceStyle, diceStyle);
@@ -143,7 +175,9 @@ class ParlorSettings extends ChangeNotifier {
   void _enforceFreeLimits({bool silent = false}) {
     if (isPro) return;
     var changed = false;
-    if (ParlorThemes.isProTheme(themeId)) {
+    // The custom theme creator is a Pro feature ('custom' is not covered by
+    // ParlorThemes.isProTheme, so it needs an explicit check).
+    if (themeId == 'custom' || ParlorThemes.isProTheme(themeId)) {
       themeId = 'classic';
       changed = true;
     }
@@ -173,6 +207,7 @@ class ParlorSettings extends ChangeNotifier {
   }
 
   Future<void> setCustomColor(String key, int argb) async {
+    if (!isPro) return; // custom theme creator is a Pro feature
     if (!_defaultCustomColors.containsKey(key)) return;
     customColors[key] = argb;
     notifyListeners();
@@ -240,8 +275,9 @@ class ParlorSettings extends ChangeNotifier {
   }
 
   Future<void> setTheme(String id) async {
-    // Pro-only themes require Pro; silently ignore otherwise (UI shows lock).
-    if (!isPro && ParlorThemes.isProTheme(id)) return;
+    // Pro-only themes (incl. the custom theme creator) require Pro;
+    // silently ignore otherwise (UI shows lock).
+    if (!isPro && (id == 'custom' || ParlorThemes.isProTheme(id))) return;
     themeId = id;
     notifyListeners();
     await _save();
