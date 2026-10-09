@@ -1,30 +1,71 @@
 import 'package:flutter/material.dart';
-import 'package:wajiha_game_core/wajiha_game_core.dart';
-import 'game_screen.dart';
+import 'package:flutter/services.dart';
+import 'screens/menu_screen.dart';
+import 'services/audio_service.dart';
+import 'services/settings_service.dart';
+import 'theme/artisan_parlor.dart';
 
-void main() => runApp(const LudoApp());
+// Old lib/game_screen.dart (GameShell edition) is retired by this rebuild.
+// Game logic lives on in lib/engine/ludo_engine.dart.
 
-class LudoApp extends StatelessWidget {
-  const LudoApp({super.key});
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  final settings = ParlorSettings();
+  await settings.load();
+  final audio = ParlorAudio();
+  audio.configure(
+    musicOn: settings.musicOn,
+    sfxOn: settings.sfxOn,
+    volume: settings.volume,
+  );
+  runApp(LudoApp(settings: settings, audio: audio));
+}
+
+class LudoApp extends StatefulWidget {
+  final ParlorSettings settings;
+  final ParlorAudio audio;
+  const LudoApp({super.key, required this.settings, required this.audio});
+
+  @override
+  State<LudoApp> createState() => _LudoAppState();
+}
+
+class _LudoAppState extends State<LudoApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.audio.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Duck music when backgrounded; game screens auto-pause themselves.
+    if (state == AppLifecycleState.paused) {
+      widget.audio.stopMusic();
+    } else if (state == AppLifecycleState.resumed &&
+        widget.settings.musicOn) {
+      widget.audio.startMenuMusic();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GameShell(
-      variant: ShellVariant.cozyPaper,
+    return MaterialApp(
       title: 'Ludo',
-      tagline: 'Roll big, capture bigger, race all four tokens home! 🎲',
-      emoji: '🎲',
-      slug: 'ludo',
-      howToPlay: '• Tap the dice, then tap a glowing token to move it\n'
-          '• Roll a 6 to launch a token out of base\n'
-          '• Land on a rival\'s token to send it back to base (💥 capture!)\n'
-          '• ⭐ Star squares are safe — no captures there\n'
-          '• You need the EXACT roll to enter the home triangle\n'
-          '• Bonus turn on a 6, a capture, or bringing a token home\n'
-          '• First to bring all 4 tokens home wins! 🏆',
-      playerOptions: const [1, 2, 3, 4],
-      supportsBots: true,
-      gameBuilder: (ctx, players, cb) => LudoScreen(players: players, callbacks: cb),
+      debugShowCheckedModeBanner: false,
+      theme: Parlor.theme(),
+      home: MenuScreen(audio: widget.audio, settings: widget.settings),
     );
   }
 }
