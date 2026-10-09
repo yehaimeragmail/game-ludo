@@ -47,6 +47,34 @@ Offset tokenUnits(List<int> seats, List<List<int>> steps, int pi, int ti) {
   return Offset(7.5 + (ti % 2 == 0 ? -0.45 : 0.45), 7.5 + (ti < 2 ? -0.45 : 0.45));
 }
 
+/// Fractional token position for move animations: [step] may be fractional.
+/// -1 = base well, 0..50 track, 51..55 home column, 56 = home triangle.
+Offset tokenUnitsAt(List<int> seats, int pi, int ti, double step) {
+  final seat = seats[pi];
+  if (step < 0) {
+    final o = baseOrigins[seat];
+    return Offset(o[1] + (ti % 2 == 0 ? 1.7 : 4.3), o[0] + (ti < 2 ? 1.7 : 4.3));
+  }
+  Offset wp(int s) {
+    if (s <= 50) {
+      final t = trackCells[(startIdx[seat] + s) % 52];
+      return Offset(t[1] + 0.5, t[0] + 0.5);
+    } else if (s <= 55) {
+      final h = homeCols[seat][s - 51];
+      return Offset(h[1] + 0.5, h[0] + 0.5);
+    }
+    return Offset(
+        7.5 + (ti % 2 == 0 ? -0.45 : 0.45), 7.5 + (ti < 2 ? -0.45 : 0.45));
+  }
+
+  final i = step.floor().clamp(0, 56);
+  final f = (step - step.floor()).clamp(0.0, 1.0);
+  if (f == 0 || i >= 56) return wp(i);
+  final a = wp(i);
+  final b = wp(i + 1);
+  return Offset(a.dx + (b.dx - a.dx) * f, a.dy + (b.dy - a.dy) * f);
+}
+
 /// Integer board cell of a token (for tap hit-testing).
 List<int> tokenCell(List<int> seats, List<List<int>> steps, int pi, int ti) {
   final seat = seats[pi];
@@ -63,10 +91,10 @@ List<int> tokenCell(List<int> seats, List<List<int>> steps, int pi, int ti) {
 }
 
 // ---------------------------------------------------------------------------
-// Player
+// Player / difficulty
 // ---------------------------------------------------------------------------
 class LudoPlayer {
-  final String name;
+  String name;
   final Color color;
   final bool isBot;
   int homeCount = 0;
@@ -74,45 +102,153 @@ class LudoPlayer {
   LudoPlayer({required this.name, required this.color, required this.isBot});
 }
 
+/// 0 = easy, 1 = medium, 2 = hard (RULES.md §11).
+enum BotDifficulty { easy, medium, hard }
+
+/// Turn phases owned entirely by the engine. The UI only renders.
+enum Phase { awaitingRoll, rolling, awaitingMove, animating, over }
+
+/// A token move in flight (visual). The logical move is applied at once;
+/// the UI interpolates the token from [fromStep] to [toStep].
+class MoveAnim {
+  final int pi;
+  final int ti;
+  final int fromStep;
+  final int toStep;
+  final int totalMs;
+  final DateTime startedAt = DateTime.now();
+
+  MoveAnim({
+    required this.pi,
+    required this.ti,
+    required this.fromStep,
+    required this.toStep,
+    required this.totalMs,
+  });
+
+  double get progress {
+    final e = DateTime.now().difference(startedAt).inMilliseconds;
+    return (e / totalMs).clamp(0.0, 1.0);
+  }
+
+  /// Interpolated step (fractional) for the UI to render.
+  double get currentStep {
+    final p = progress;
+    final eased = p < 0.5
+        ? 2 * p * p
+        : 1 - pow(-2 * p + 2, 2) / 2; // easeInOutQuad
+    if (fromStep < 0) return toStep.toDouble(); // base exit: pop, no slide
+    return fromStep + (toStep - fromStep) * eased;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Engine: deterministic rules, state, bot AI. UI-agnostic.
 // ---------------------------------------------------------------------------
 class LudoEngine extends ChangeNotifier {
   final List<LudoPlayer> players;
+  final BotDifficulty botDifficulty;
   late final List<int> seats;
   late List<List<int>> steps; // -1 base, 0..50 track, 51..55 home col, 56 done
 
   int turn = 0;
-  int dice = 0; // 0 = awaiting roll
-  bool rolling = false;
+  int dice = 0; // 0 = not rolled / consumed
+  Phase phase = Phase.awaitingRoll;
   List<int> movable = [];
+  MoveAnim? moveAnim;
   bool over = false;
   int? winner;
   int sixStreak = 0;
   int turnCount = 0;
   String banner = '';
+  int lastRollBy = -1; // player index whose dice is showing the value
 
   final _rand = Random();
-  Timer? _botTimer;
+  Timer? _timer; // single phase-transition timer
+  Timer? _watchdog; // stuck-state recovery
+  bool _disposed = false;
+  bool paused = false;
 
-  LudoEngine({required this.players}) {
+  static const rollDurationMs = 1100;
+  static const perStepMs = 170;
+
+  /// Test hook: when set, the next roll settles to this value instead of
+  /// a random one. Consumed after one use.
+  @visibleForTesting
+  int? forcedRoll;
+
+  LudoEngine({required this.players, this.botDifficulty = BotDifficulty.medium}) {
     seats = switch (players.length) {
-      2 => [0, 2],
+      2 => [0, 2], // RULES §12: opposite corners
       3 => [0, 1, 2],
       _ => [0, 1, 2, 3],
     };
     steps = List.generate(players.length, (_) => List.filled(4, -1));
     banner = 'Tap the dice, ${players[0].name}!';
+    _watchdog = Timer.periodic(const Duration(seconds: 3), (_) => _recover());
+    // If the first player is a bot, kick off their turn.
+    _afterPhase();
   }
 
   int get n => players.length;
   LudoPlayer get current => players[turn];
-  bool get awaitingRoll => dice == 0 && !rolling && !over;
+  bool get rolling => phase == Phase.rolling;
+  bool get awaitingRoll => phase == Phase.awaitingRoll && !over;
+  bool get awaitingHumanMove =>
+      phase == Phase.awaitingMove && !current.isBot && !over;
 
   @override
   void dispose() {
-    _botTimer?.cancel();
+    _disposed = true;
+    _timer?.cancel();
+    _watchdog?.cancel();
     super.dispose();
+  }
+
+  void _arm(Duration d, void Function() fn) {
+    if (_disposed || paused) return;
+    _timer?.cancel();
+    _timer = Timer(d, () {
+      _timer = null;
+      if (!_disposed && !paused) fn();
+    });
+  }
+
+  /// Pause: freeze the phase timer. Resume re-arms the current phase.
+  void setPaused(bool v) {
+    if (paused == v || _disposed) return;
+    paused = v;
+    if (v) {
+      _timer?.cancel();
+      _timer = null;
+    } else {
+      _recover();
+    }
+    notifyListeners();
+  }
+
+  /// Watchdog: if the single phase timer ever dies without progress, recover.
+  /// This makes stuck states impossible by construction. Respects [paused].
+  void _recover() {
+    if (_disposed || over || paused || _timer != null) return;
+    if (phase == Phase.rolling) {
+      _settleRoll(); // rolling with no timer: settle immediately
+    } else if (phase == Phase.awaitingRoll && current.isBot) {
+      _botRoll();
+    } else if (phase == Phase.awaitingMove &&
+        current.isBot &&
+        movable.isNotEmpty) {
+      _botMove();
+    } else if (phase == Phase.animating && moveAnim != null) {
+      // Resume the interrupted move animation with remaining time.
+      final anim = moveAnim!;
+      final elapsed =
+          DateTime.now().difference(anim.startedAt).inMilliseconds;
+      final remain = (anim.totalMs - elapsed).clamp(50, anim.totalMs);
+      _arm(Duration(milliseconds: remain), _afterMoveAnim);
+    } else if (phase == Phase.animating && moveAnim == null) {
+      _afterMoveAnim();
+    }
   }
 
   /// Track square index (0..51) for a player's token step, or -1 if not on track.
@@ -122,7 +258,6 @@ class LudoEngine extends ChangeNotifier {
   }
 
   /// Returns the player index owning a block on [trackIdx], or -1.
-  /// A block = 2+ tokens of one player on the same track square.
   int _blockOwnerAt(int trackIdx, int forPi) {
     for (int p = 0; p < n; p++) {
       if (p == forPi) continue;
@@ -143,7 +278,7 @@ class LudoEngine extends ChangeNotifier {
       final idx = _trackIndex(pi, 0);
       return _blockOwnerAt(idx, pi) == -1;
     }
-    if (s + dice > 56) return false; // exact roll required
+    if (s + dice > 56) return false; // exact roll required (RULES §4)
     final dest = s + dice;
     if (dest <= 50) {
       for (int step = s + 1; step <= dest; step++) {
@@ -162,22 +297,33 @@ class LudoEngine extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------- turn flow
+  /// Human taps their dice.
   void roll() {
     if (!awaitingRoll || current.isBot) return;
-    _doRoll();
+    _beginRoll();
   }
 
-  void _doRoll() {
-    rolling = true;
+  void _botRoll() {
+    if (!awaitingRoll || !current.isBot || over) return;
+    _beginRoll();
+  }
+
+  void _beginRoll() {
+    phase = Phase.rolling;
     dice = 0;
+    movable = [];
+    lastRollBy = turn;
+    onEvent?.call(LudoEvent.diceRolling);
     notifyListeners();
+    _arm(const Duration(milliseconds: rollDurationMs), _settleRoll);
   }
 
-  /// Called by the UI's dice animation when the final value is chosen.
-  void settleRoll(int value) {
-    if (over) return;
-    rolling = false;
-    dice = value;
+  /// Engine-owned settle — the UI never calls this. No desync possible.
+  void _settleRoll() {
+    if (over || phase != Phase.rolling) return;
+    phase = Phase.awaitingMove;
+    dice = forcedRoll ?? (1 + _rand.nextInt(6));
+    forcedRoll = null;
     if (dice == 6) {
       sixStreak++;
       if (sixStreak >= 3) {
@@ -185,9 +331,10 @@ class LudoEngine extends ChangeNotifier {
         banner = 'Three sixes! Turn forfeited.';
         dice = 0;
         movable = [];
+        phase = Phase.awaitingRoll;
         notifyListeners();
         onEvent?.call(LudoEvent.turnForfeited);
-        Future.delayed(const Duration(milliseconds: 1200), _nextTurn);
+        _arm(const Duration(milliseconds: 1200), _nextTurn);
         return;
       }
     } else {
@@ -195,28 +342,28 @@ class LudoEngine extends ChangeNotifier {
     }
     movable = _movableTokens();
     if (movable.isEmpty) {
+      // RULES §12: no legal moves → turn passes automatically.
       banner = 'No moves possible.';
+      phase = Phase.awaitingRoll;
       notifyListeners();
       onEvent?.call(LudoEvent.noMoves);
-      Future.delayed(const Duration(milliseconds: 1100), () {
-        if (!over) _nextTurn();
-      });
+      _arm(const Duration(milliseconds: 1100), _nextTurn);
       return;
     }
     if (current.isBot) {
       banner = '${current.name} is thinking…';
       notifyListeners();
-      _botTimer?.cancel();
-      _botTimer = Timer(const Duration(milliseconds: 600), () {
-        if (over || dice == 0) return;
-        moveToken(_botPick(movable));
-      });
+      _arm(const Duration(milliseconds: 850), _botMove);
     } else {
-      banner = movable.length == 1 ? 'Only one move!' : 'Tap a glowing token!';
+      banner =
+          movable.length == 1 ? 'Only one move — go!' : 'Tap a glowing token!';
       notifyListeners();
       if (movable.length == 1) {
-        Future.delayed(const Duration(milliseconds: 450), () {
-          if (!over && dice != 0 && movable.isNotEmpty) {
+        // Convenience auto-move; tapping first cancels it via moveToken guard.
+        _arm(const Duration(milliseconds: 700), () {
+          if (phase == Phase.awaitingMove &&
+              !current.isBot &&
+              movable.isNotEmpty) {
             moveToken(movable.first);
           }
         });
@@ -224,14 +371,37 @@ class LudoEngine extends ChangeNotifier {
     }
   }
 
+  void _botMove() {
+    if (over || phase != Phase.awaitingMove || !current.isBot) return;
+    if (movable.isEmpty) {
+      _nextTurn();
+      return;
+    }
+    _botMoving = true;
+    try {
+      moveToken(_botPick(movable));
+    } finally {
+      _botMoving = false;
+    }
+  }
+
   /// UI hook for sounds / haptics. Set by the screen.
   void Function(LudoEvent event)? onEvent;
 
+  /// Token tap (human) or bot move. Guarded: correct phase, movable token,
+  /// and bots may only move through [_botMove].
   void moveToken(int ti) {
-    if (over || dice == 0 || !movable.contains(ti)) {
+    final botOk = !current.isBot || _botMoving;
+    if (over || phase != Phase.awaitingMove || !botOk || !movable.contains(ti)) {
       onEvent?.call(LudoEvent.invalid);
       return;
     }
+    _applyMove(ti);
+  }
+
+  bool _botMoving = false;
+
+  void _applyMove(int ti) {
     final pi = turn;
     final was6 = dice == 6;
     final from = steps[pi][ti];
@@ -245,7 +415,7 @@ class LudoEngine extends ChangeNotifier {
           if (p == pi) continue;
           for (int k = 0; k < 4; k++) {
             if (_trackIndex(p, steps[p][k]) == idx) {
-              steps[p][k] = -1; // captured back to base
+              steps[p][k] = -1; // captured back to base (RULES §6)
               captured = true;
             }
           }
@@ -257,6 +427,19 @@ class LudoEngine extends ChangeNotifier {
     dice = 0;
     movable = [];
     players[pi].homeCount = steps[pi].where((s) => s == 56).length;
+    // RULES §3: extra roll on 6, capture, or bringing a token home.
+    _lastWasExtra = was6 || captured || homed;
+
+    // Visible step-by-step animation state for the UI.
+    final stepCount = from < 0 ? 1 : (dest - from).clamp(1, 12);
+    moveAnim = MoveAnim(
+      pi: pi,
+      ti: ti,
+      fromStep: from,
+      toStep: dest,
+      totalMs: (stepCount * perStepMs + 250).clamp(400, 1800),
+    );
+    phase = Phase.animating;
 
     if (captured) {
       banner = 'Capture! ${players[pi].name} sends a rival home!';
@@ -271,13 +454,26 @@ class LudoEngine extends ChangeNotifier {
       onEvent?.call(LudoEvent.move);
     }
     notifyListeners();
+    _arm(Duration(milliseconds: moveAnim!.totalMs), _afterMoveAnim);
+  }
 
+  // Stashed across the animation so _afterMoveAnim knows the context.
+  bool _lastWasExtra = false;
+
+  void _afterMoveAnim() {
+    if (over) return;
+    moveAnim = null;
+    final pi = turn;
     if (steps[pi].every((s) => s == 56)) {
       _finish(pi);
       return;
     }
-    if (was6 || captured || homed) {
-      _botCheck(); // same player rolls again
+    if (_lastWasExtra) {
+      // Extra roll (6 / capture / token home): same player rolls again.
+      phase = Phase.awaitingRoll;
+      banner = '${players[turn].name}, roll again!';
+      notifyListeners();
+      _afterPhase();
     } else {
       _nextTurn();
     }
@@ -288,50 +484,54 @@ class LudoEngine extends ChangeNotifier {
     turn = (turn + 1) % n;
     sixStreak = 0;
     turnCount++;
-    banner = '${players[turn].name}, tap the dice!';
+    phase = Phase.awaitingRoll;
+    banner = current.isBot
+        ? '${current.name} is up…'
+        : '${current.name}, tap the dice!';
     notifyListeners();
-    _botCheck();
+    _afterPhase();
   }
 
-  void _botCheck() {
-    if (over || !current.isBot) return;
-    _botTimer?.cancel();
-    _botTimer = Timer(const Duration(milliseconds: 700), () {
-      if (over || !current.isBot || !awaitingRoll) return;
-      _doRoll();
-      onEvent?.call(LudoEvent.botRolling);
-    });
+  /// Called whenever we enter awaitingRoll: bots roll themselves.
+  void _afterPhase() {
+    if (over || phase != Phase.awaitingRoll) return;
+    if (current.isBot) {
+      _arm(const Duration(milliseconds: 750), _botRoll);
+    }
   }
-
-  /// Call after the UI finishes the bot's dice animation.
-  void botSettle(int value) => settleRoll(value);
 
   void _finish(int pi) {
     over = true;
+    phase = Phase.over;
     winner = pi;
+    moveAnim = null;
     banner = '${players[pi].name} wins!';
     notifyListeners();
-    onEvent?.call(
-        players[pi].isBot ? LudoEvent.botWon : LudoEvent.humanWon);
+    onEvent?.call(players[pi].isBot ? LudoEvent.botWon : LudoEvent.humanWon);
   }
 
   void restart() {
-    _botTimer?.cancel();
+    _timer?.cancel();
+    paused = false;
     steps = List.generate(n, (_) => List.filled(4, -1));
     for (final p in players) {
       p.homeCount = 0;
     }
     turn = 0;
     dice = 0;
-    rolling = false;
+    phase = Phase.awaitingRoll;
     movable = [];
+    moveAnim = null;
     over = false;
     winner = null;
     sixStreak = 0;
     turnCount = 0;
-    banner = 'Tap the dice, ${players[0].name}!';
+    lastRollBy = -1;
+    _lastWasExtra = false;
+    _botMoving = false;
+    banner = current.isBot ? '${current.name} is up…' : 'Tap the dice, ${players[0].name}!';
     notifyListeners();
-    _botCheck();
+    _afterPhase();
   }
 
   // ---------------------------------------------------------------- bot AI
@@ -355,7 +555,7 @@ class LudoEngine extends ChangeNotifier {
             }
           }
         }
-        // 6. Danger: landing on an unsafe square within 6 ahead of a rival.
+        // 6. Danger: landing unsafe within 6 ahead of a rival.
         for (int p = 0; p < n; p++) {
           if (p == pi) continue;
           for (int k = 0; k < 4; k++) {
@@ -378,22 +578,37 @@ class LudoEngine extends ChangeNotifier {
     return score;
   }
 
+  /// RULES.md §11 difficulty scaling.
   int _botPick(List<int> options) {
-    final ranked = [...options]
-      ..sort((a, b) => _scoreMove(turn, b).compareTo(_scoreMove(turn, a)));
-    if (ranked.length > 1 && _rand.nextDouble() < 0.12) return ranked[1];
-    return ranked.first;
+    switch (botDifficulty) {
+      case BotDifficulty.easy:
+        // Easy: fully random — playful, beatable.
+        return options[_rand.nextInt(options.length)];
+      case BotDifficulty.medium:
+        // Medium: best move with 25% noise.
+        final ranked = [...options]
+          ..sort((a, b) => _scoreMove(turn, b).compareTo(_scoreMove(turn, a)));
+        if (ranked.length > 1 && _rand.nextDouble() < 0.25) {
+          return ranked[1 + _rand.nextInt(ranked.length - 1)];
+        }
+        return ranked.first;
+      case BotDifficulty.hard:
+        // Hard: best move, deterministic.
+        final ranked = [...options]
+          ..sort((a, b) => _scoreMove(turn, b).compareTo(_scoreMove(turn, a)));
+        return ranked.first;
+    }
   }
 }
 
 enum LudoEvent {
+  diceRolling,
   move,
   capture,
   tokenHome,
   invalid,
   noMoves,
   turnForfeited,
-  botRolling,
   humanWon,
   botWon,
 }

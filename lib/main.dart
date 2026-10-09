@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/menu_screen.dart';
+import 'screens/splash_screen.dart';
 import 'services/audio_service.dart';
 import 'services/settings_service.dart';
 import 'theme/artisan_parlor.dart';
-
-// Old lib/game_screen.dart (GameShell edition) is retired by this rebuild.
-// Game logic lives on in lib/engine/ludo_engine.dart.
+import 'theme/parlor_themes.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,22 +48,27 @@ class _LudoAppState extends State<LudoApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Duck music when backgrounded; game screens auto-pause themselves.
+    // Pause (not stop) on interruption so music resumes exactly where it
+    // left off; game screens additionally freeze their engines.
     if (state == AppLifecycleState.paused) {
-      widget.audio.stopMusic();
-    } else if (state == AppLifecycleState.resumed &&
-        widget.settings.musicOn) {
-      widget.audio.startMenuMusic();
+      widget.audio.onAppPaused();
+    } else if (state == AppLifecycleState.resumed) {
+      widget.audio.onAppResumed();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Ludo',
-      debugShowCheckedModeBanner: false,
-      theme: Parlor.theme(),
-      home: MenuScreen(audio: widget.audio, settings: widget.settings),
+    return ListenableBuilder(
+      listenable: widget.settings,
+      builder: (_, _) => MaterialApp(
+        title: 'Ludo',
+        debugShowCheckedModeBanner: false,
+        theme:
+            Parlor.theme(ParlorThemes.byId(widget.settings.themeId)),
+        home:
+            SplashScreen(audio: widget.audio, settings: widget.settings),
+      ),
     );
   }
 }

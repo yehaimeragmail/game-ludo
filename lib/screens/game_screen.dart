@@ -5,10 +5,15 @@ import '../engine/ludo_engine.dart';
 import '../services/audio_service.dart';
 import '../services/settings_service.dart';
 import '../theme/artisan_parlor.dart';
+import '../theme/parlor_themes.dart';
 import 'settings_screen.dart';
 
-/// Ludo game screen — Artisan Parlor edition.
-/// Renders the [LudoEngine] state with a physical walnut-and-brass board.
+/// Ludo game screen — Artisan Parlor exemplar edition.
+///
+/// - Every player side has its OWN dice: it activates and rolls with a
+///   real-time animation on the current player's card (human or bot).
+/// - Token moves animate step-by-step; bot turns are fully visible.
+/// - The engine owns the turn state machine, so the UI can never desync.
 class GameScreen extends StatefulWidget {
   final LudoEngine engine;
   final ParlorAudio audio;
@@ -27,21 +32,18 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late final AnimationController _pulse;
-  Timer? _diceTimer;
-  int _shownDice = 0;
+  late final AnimationController _moveCtrl;
+  MoveAnim? _shownAnim;
   bool _paused = false;
-  final _rand = Random();
 
   LudoEngine get _e => widget.engine;
+  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _pulse = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+    _moveCtrl = AnimationController(vsync: this);
     _e.onEvent = _onEngineEvent;
     _e.addListener(_onEngineChanged);
     widget.audio.startGameMusic();
@@ -50,21 +52,38 @@ class _GameScreenState extends State<GameScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pulse.dispose();
-    _diceTimer?.cancel();
+    _moveCtrl.dispose();
     _e.removeListener(_onEngineChanged);
+    _e.onEvent = null;
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused && !_e.over && !_paused) {
-      setState(() => _paused = true); // auto-pause in background
+    if (state == AppLifecycleState.paused) {
+      widget.audio.onAppPaused();
+      if (!_e.over && mounted) {
+        setState(() {
+          _paused = true;
+          _e.setPaused(true);
+        });
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      widget.audio.onAppResumed();
     }
   }
 
   void _onEngineChanged() {
     if (!mounted) return;
+    // Drive the move-animation controller from the engine's MoveAnim.
+    final anim = _e.moveAnim;
+    if (anim != null && !identical(anim, _shownAnim)) {
+      _shownAnim = anim;
+      _moveCtrl.duration = Duration(milliseconds: anim.totalMs);
+      _moveCtrl.forward(from: 0);
+    } else if (anim == null) {
+      _shownAnim = null;
+    }
     setState(() {});
     if (_e.over) _onGameOver();
   }
@@ -72,6 +91,9 @@ class _GameScreenState extends State<GameScreen>
   Future<void> _onEngineEvent(LudoEvent event) async {
     final a = widget.audio;
     switch (event) {
+      case LudoEvent.diceRolling:
+        await a.dice();
+        break;
       case LudoEvent.move:
         await a.move();
         break;
@@ -87,9 +109,6 @@ class _GameScreenState extends State<GameScreen>
       case LudoEvent.noMoves:
       case LudoEvent.turnForfeited:
         await a.invalid();
-        break;
-      case LudoEvent.botRolling:
-        _animateDice(isBot: true);
         break;
       case LudoEvent.humanWon:
         await a.win();
@@ -115,6 +134,7 @@ class _GameScreenState extends State<GameScreen>
         winnerColor: w.color,
         humanWon: humanWon,
         audio: widget.audio,
+        theme: _t,
       ),
     );
     if (!mounted) return;
@@ -127,39 +147,16 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
-  void _animateDice({required bool isBot}) {
-    _diceTimer?.cancel();
-    widget.audio.dice();
-    int ticks = 0;
-    _diceTimer = Timer.periodic(const Duration(milliseconds: 70), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      ticks++;
-      setState(() => _shownDice = _rand.nextInt(6) + 1);
-      if (ticks >= 9) {
-        t.cancel();
-        final value = _rand.nextInt(6) + 1;
-        setState(() => _shownDice = value);
-        if (isBot) {
-          _e.botSettle(value);
-        } else {
-          _e.settleRoll(value);
-        }
-      }
-    });
-  }
-
-  void _onDiceTap() {
-    if (!_e.awaitingRoll || _e.current.isBot || _paused) return;
-    widget.audio.click();
-    _e.roll(); // sets rolling=true
-    _animateDice(isBot: false);
+  void _onDiceTap(int pi) {
+    if (_paused || _e.over) return;
+    if (_e.awaitingRoll && _e.turn == pi && !_e.current.isBot) {
+      widget.audio.click();
+      _e.roll();
+    }
   }
 
   void _onBoardTap(Offset local, double size) {
-    if (_e.over || _e.dice == 0 || _e.current.isBot || _paused) return;
+    if (_paused || _e.over || !_e.awaitingHumanMove) return;
     final cell = size / 15;
     final r = (local.dy / cell).floor().clamp(0, 14);
     final c = (local.dx / cell).floor().clamp(0, 14);
@@ -175,31 +172,46 @@ class _GameScreenState extends State<GameScreen>
 
   void _togglePause() {
     widget.audio.click();
-    setState(() => _paused = !_paused);
+    setState(() {
+      _paused = !_paused;
+      _e.setPaused(_paused);
+      if (_paused) {
+        widget.audio.onAppPaused();
+      } else {
+        widget.audio.onAppResumed();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final me = _e.current;
-    final canRoll =
-        _e.awaitingRoll && !me.isBot && !_paused && !_e.over;
+    final t = _t;
     return WoodBackdrop(
+      theme: t,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.pause, color: Parlor.brassLight),
+            icon: Icon(_paused ? Icons.play_arrow : Icons.pause,
+                color: t.accentLight),
             onPressed: _togglePause,
           ),
-          title: Text('Ludo', style: Parlor.display(22)),
+          title: Text('Ludo', style: Parlor.display(22, theme: t)),
           centerTitle: true,
           actions: [
             IconButton(
-              icon: const Icon(Icons.settings, color: Parlor.brassLight),
+              icon: Icon(Icons.settings, color: t.accentLight),
               onPressed: () async {
                 widget.audio.click();
+                final wasPaused = _paused;
+                if (!wasPaused) {
+                  setState(() {
+                    _paused = true;
+                    _e.setPaused(true);
+                  });
+                }
                 await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SettingsScreen(
                     audio: widget.audio,
@@ -211,6 +223,12 @@ class _GameScreenState extends State<GameScreen>
                   sfxOn: widget.settings.sfxOn,
                   volume: widget.settings.volume,
                 );
+                if (mounted && !wasPaused) {
+                  setState(() {
+                    _paused = false;
+                    _e.setPaused(false);
+                  });
+                }
               },
             ),
           ],
@@ -220,49 +238,49 @@ class _GameScreenState extends State<GameScreen>
             SingleChildScrollView(
               child: Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: Column(
                   children: [
-                    _TurnPlaque(player: me, banner: _e.banner),
+                    _TurnPlaque(engine: _e, theme: t),
                     const SizedBox(height: 8),
-                    _ScoreStrip(engine: _e),
+                    _PlayerStrip(
+                      engine: _e,
+                      theme: t,
+                      diceStyle: widget.settings.diceStyle,
+                      onDiceTap: _onDiceTap,
+                      paused: _paused,
+                    ),
                     const SizedBox(height: 10),
                     AspectRatio(
                       aspectRatio: 1,
                       child: Builder(
                         builder: (bctx) => GestureDetector(
                           onTapDown: (d) {
-                            final box = bctx.findRenderObject()! as RenderBox;
+                            final box =
+                                bctx.findRenderObject()! as RenderBox;
                             _onBoardTap(d.localPosition, box.size.width);
                           },
-                          child: CustomPaint(
-                            painter: _ParlorBoardPainter(
-                              engine: _e,
-                              pulse: _pulse,
+                          child: AnimatedBuilder(
+                            animation: _moveCtrl,
+                            builder: (_, _) => CustomPaint(
+                              painter: _ParlorBoardPainter(
+                                engine: _e,
+                                theme: t,
+                                tokenShape: widget.settings.tokenShape,
+                                animProgress: _moveCtrl.value,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _DiceTray(
-                          value: _shownDice,
-                          rolling: _e.rolling,
-                          canRoll: canRoll,
-                          onTap: _onDiceTap,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Text(
-                            _hintText(),
-                            style: Parlor.body(15,
-                                color: Parlor.ivoryDim),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 10),
+                    Text(
+                      _hintText(),
+                      style: Parlor.body(14,
+                          theme: t,
+                          color: t.ivory.withValues(alpha: 0.8)),
+                      textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -271,6 +289,7 @@ class _GameScreenState extends State<GameScreen>
             ),
             if (_paused && !_e.over)
               _PauseOverlay(
+                theme: t,
                 onResume: _togglePause,
                 onRestart: () {
                   setState(() => _paused = false);
@@ -290,34 +309,49 @@ class _GameScreenState extends State<GameScreen>
 
   String _hintText() {
     if (_e.over) return '';
+    if (_paused) return 'Paused';
     final me = _e.current;
-    if (me.isBot) return '${me.name} is playing…';
-    if (_e.rolling) return 'Rolling…';
-    if (_e.dice == 0) return 'Your turn — tap the dice!';
-    if (_e.movable.isEmpty) return '';
-    return 'Tap a glowing token!';
+    switch (_e.phase) {
+      case Phase.rolling:
+        return '${me.name} is rolling…';
+      case Phase.awaitingRoll:
+        return me.isBot ? '${me.name} is up…' : 'Your turn — tap your dice!';
+      case Phase.awaitingMove:
+        if (me.isBot) return '${me.name} is thinking…';
+        return _e.movable.length == 1
+            ? 'Only one move — go!'
+            : 'Tap a glowing token!';
+      case Phase.animating:
+        return '';
+      case Phase.over:
+        return '';
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Turn plaque
+// Turn plaque: current player + banner.
 // ---------------------------------------------------------------------------
 class _TurnPlaque extends StatelessWidget {
-  final LudoPlayer player;
-  final String banner;
-  const _TurnPlaque({required this.player, required this.banner});
+  final LudoEngine engine;
+  final ParlorThemeDef theme;
+  const _TurnPlaque({required this.engine, required this.theme});
 
   @override
   Widget build(BuildContext context) {
+    final player = engine.current;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: Parlor.walnutDeep.withValues(alpha: 0.8),
+        color: theme.woodDeep.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(12),
         border:
-            Border.all(color: Parlor.brass.withValues(alpha: 0.5), width: 1.5),
-        boxShadow: const [
-          BoxShadow(color: Parlor.shadow, offset: Offset(0, 4), blurRadius: 8),
+            Border.all(color: theme.accent.withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              offset: const Offset(0, 4),
+              blurRadius: 8),
         ],
       ),
       child: Row(
@@ -328,11 +362,11 @@ class _TurnPlaque extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: player.color,
-              border: Border.all(color: Parlor.brassLight, width: 2),
-              boxShadow: const [
+              border: Border.all(color: theme.accentLight, width: 2),
+              boxShadow: [
                 BoxShadow(
-                    color: Parlor.shadow,
-                    offset: Offset(0, 2),
+                    color: Colors.black.withValues(alpha: 0.5),
+                    offset: const Offset(0, 2),
                     blurRadius: 4),
               ],
             ),
@@ -344,11 +378,11 @@ class _TurnPlaque extends StatelessWidget {
               children: [
                 Text(
                   '${player.name}${player.isBot ? '  •  BOT' : ''}',
-                  style: Parlor.label(13, color: Parlor.brassLight),
+                  style: Parlor.label(13, theme: theme),
                 ),
                 Text(
-                  banner,
-                  style: Parlor.body(14),
+                  engine.banner,
+                  style: Parlor.body(14, theme: theme),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -362,37 +396,36 @@ class _TurnPlaque extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Score strip: home counts per player
+// Player strip: EVERY side gets its own dice. The current player's dice
+// activates, rolls with a real-time animation, and is tappable for humans.
 // ---------------------------------------------------------------------------
-class _ScoreStrip extends StatelessWidget {
+class _PlayerStrip extends StatelessWidget {
   final LudoEngine engine;
-  const _ScoreStrip({required this.engine});
+  final ParlorThemeDef theme;
+  final int diceStyle;
+  final void Function(int pi) onDiceTap;
+  final bool paused;
+  const _PlayerStrip({
+    required this.engine,
+    required this.theme,
+    required this.diceStyle,
+    required this.onDiceTap,
+    required this.paused,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         for (int i = 0; i < engine.n; i++)
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 6),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: engine.turn == i
-                  ? engine.players[i].color.withValues(alpha: 0.35)
-                  : Parlor.walnutDeep.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: engine.turn == i
-                    ? Parlor.brassLight
-                    : Parlor.brass.withValues(alpha: 0.3),
-                width: 1.5,
-              ),
-            ),
-            child: Text(
-              '${engine.players[i].name.split(' ').first}  ${engine.players[i].homeCount}/4',
-              style: Parlor.label(12),
+          Expanded(
+            child: _PlayerCard(
+              engine: engine,
+              theme: theme,
+              pi: i,
+              diceStyle: diceStyle,
+              onDiceTap: onDiceTap,
+              paused: paused,
             ),
           ),
       ],
@@ -400,55 +433,223 @@ class _ScoreStrip extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Dice tray: ivory die with engraved pips
-// ---------------------------------------------------------------------------
-class _DiceTray extends StatelessWidget {
-  final int value;
-  final bool rolling;
-  final bool canRoll;
-  final VoidCallback onTap;
-  const _DiceTray({
-    required this.value,
-    required this.rolling,
-    required this.canRoll,
-    required this.onTap,
+class _PlayerCard extends StatelessWidget {
+  final LudoEngine engine;
+  final ParlorThemeDef theme;
+  final int pi;
+  final int diceStyle;
+  final void Function(int pi) onDiceTap;
+  final bool paused;
+  const _PlayerCard({
+    required this.engine,
+    required this.theme,
+    required this.pi,
+    required this.diceStyle,
+    required this.onDiceTap,
+    required this.paused,
   });
 
   @override
   Widget build(BuildContext context) {
+    final p = engine.players[pi];
+    final isCurrent = engine.turn == pi && !engine.over;
+    final canRoll = isCurrent &&
+        engine.awaitingRoll &&
+        !p.isBot &&
+        !paused &&
+        !engine.over;
+    final rolling = isCurrent && engine.rolling;
+    // Show this player's last settled value while it is fresh.
+    final showValue = engine.lastRollBy == pi && engine.dice != 0
+        ? engine.dice
+        : (isCurrent && engine.dice != 0 ? engine.dice : 0);
     return GestureDetector(
-      onTap: canRoll ? onTap : null,
+      onTap: canRoll ? () => onDiceTap(pi) : null,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 84,
-        height: 84,
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFFFBF0), Parlor.ivory, Color(0xFFD9CDAE)],
-          ),
+          borderRadius: BorderRadius.circular(12),
+          color: isCurrent
+              ? p.color.withValues(alpha: 0.30)
+              : theme.woodDeep.withValues(alpha: 0.6),
           border: Border.all(
-            color: canRoll ? Parlor.brassLight : Parlor.brassDark,
-            width: 3,
+            color: isCurrent ? theme.accentLight : theme.accent.withValues(alpha: 0.3),
+            width: isCurrent ? 2.5 : 1.5,
           ),
           boxShadow: [
-            BoxShadow(
-              color: Parlor.shadow.withValues(alpha: 0.7),
-              offset: const Offset(0, 6),
-              blurRadius: 10,
-            ),
-            if (canRoll)
+            if (isCurrent)
               BoxShadow(
-                color: Parlor.brass.withValues(alpha: 0.45),
-                offset: const Offset(0, 0),
-                blurRadius: 16,
+                color: theme.accent.withValues(alpha: 0.35),
+                blurRadius: 10,
               ),
           ],
         ),
-        child: CustomPaint(painter: _DicePipsPainter(value: value)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: p.color,
+                    border:
+                        Border.all(color: theme.accentLight, width: 1.2),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    p.name,
+                    style: Parlor.label(11, theme: theme),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (p.isBot)
+              Text('BOT',
+                  style: Parlor.label(9,
+                      theme: theme,
+                      color: theme.ivory.withValues(alpha: 0.6))),
+            const SizedBox(height: 6),
+            _RollingDice(
+              rolling: rolling,
+              value: rolling ? 0 : showValue,
+              diceStyle: diceStyle,
+              theme: theme,
+              active: isCurrent,
+              tappable: canRoll,
+            ),
+            const SizedBox(height: 4),
+            Text('${p.homeCount}/4 home',
+                style: Parlor.label(10, theme: theme)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A die that plays a real-time rolling animation while [rolling] is true,
+/// then rests on [value].
+class _RollingDice extends StatefulWidget {
+  final bool rolling;
+  final int value; // 0 = idle glyph
+  final int diceStyle;
+  final ParlorThemeDef theme;
+  final bool active;
+  final bool tappable;
+  const _RollingDice({
+    required this.rolling,
+    required this.value,
+    required this.diceStyle,
+    required this.theme,
+    required this.active,
+    required this.tappable,
+  });
+
+  @override
+  State<_RollingDice> createState() => _RollingDiceState();
+}
+
+class _RollingDiceState extends State<_RollingDice> {
+  Timer? _timer;
+  int _face = 1;
+  final _rand = Random();
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RollingDice old) {
+    super.didUpdateWidget(old);
+    if (old.rolling != widget.rolling) _sync();
+  }
+
+  void _sync() {
+    _timer?.cancel();
+    if (widget.rolling) {
+      _timer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+        if (!mounted) return;
+        setState(() => _face = _rand.nextInt(6) + 1);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    final shown = widget.rolling ? _face : widget.value;
+    // Dice visual per style.
+    late final Color bg0, bg1, pip, edge;
+    switch (widget.diceStyle) {
+      case 1: // Brass Noble
+        bg0 = const Color(0xFF4A3418);
+        bg1 = const Color(0xFF2A1E10);
+        pip = t.accentLight;
+        edge = t.accent;
+        break;
+      case 2: // Oak
+        bg0 = const Color(0xFF9A6530);
+        bg1 = const Color(0xFF6E4520);
+        pip = const Color(0xFF2E1A0C);
+        edge = const Color(0xFF4A2E14);
+        break;
+      default: // Ivory Classic
+        bg0 = const Color(0xFFFFFBF0);
+        bg1 = const Color(0xFFD9CDAE);
+        pip = const Color(0xFF4A2E1B);
+        edge = t.accent;
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [bg0, bg1],
+        ),
+        border: Border.all(
+          color: widget.tappable
+              ? t.accentLight
+              : widget.active
+                  ? t.accent
+                  : edge.withValues(alpha: 0.6),
+          width: widget.tappable ? 3 : 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.55),
+            offset: const Offset(0, 4),
+            blurRadius: 6,
+          ),
+          if (widget.tappable)
+            BoxShadow(
+              color: t.accent.withValues(alpha: 0.5),
+              blurRadius: 10,
+            ),
+        ],
+      ),
+      child: CustomPaint(
+        painter: _DicePipsPainter(value: shown, pip: pip, idleColor: edge),
       ),
     );
   }
@@ -456,89 +657,90 @@ class _DiceTray extends StatelessWidget {
 
 class _DicePipsPainter extends CustomPainter {
   final int value;
-  _DicePipsPainter({required this.value});
+  final Color pip;
+  final Color idleColor;
+  _DicePipsPainter(
+      {required this.value, required this.pip, required this.idleColor});
 
   @override
   void paint(Canvas canvas, Size size) {
     if (value < 1) {
-      // idle: draw a small brass die glyph
       final tp = TextPainter(
         text: TextSpan(
             text: '❖',
             style: TextStyle(
-                fontSize: 34, color: Parlor.brassDark.withValues(alpha: 0.7))),
+                fontSize: 24, color: idleColor.withValues(alpha: 0.7))),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(
-          canvas,
-          Offset((size.width - tp.width) / 2,
-              (size.height - tp.height) / 2));
+      tp.paint(canvas,
+          Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
       return;
     }
     final r = size.width * 0.075;
-    void pip(double fx, double fy) {
+    void dot(double fx, double fy) {
       final c = Offset(size.width * fx, size.height * fy);
-      // engraved pip: dark inset with subtle top highlight
-      canvas.drawCircle(c + const Offset(0, 1.2),
-          r, Paint()..color = const Color(0xFF3B2416).withValues(alpha: 0.25));
-      canvas.drawCircle(c, r, Paint()..color = const Color(0xFF4A2E1B));
+      canvas.drawCircle(c + const Offset(0, 1.0), r,
+          Paint()..color = Colors.black.withValues(alpha: 0.25));
+      canvas.drawCircle(c, r, Paint()..color = pip);
       canvas.drawCircle(
           c + Offset(-r * 0.25, -r * 0.25),
           r * 0.35,
-          Paint()..color = Colors.white.withValues(alpha: 0.18));
+          Paint()..color = Colors.white.withValues(alpha: 0.20));
     }
 
     switch (value) {
       case 1:
-        pip(0.5, 0.5);
+        dot(0.5, 0.5);
         break;
       case 2:
-        pip(0.3, 0.3);
-        pip(0.7, 0.7);
+        dot(0.3, 0.3);
+        dot(0.7, 0.7);
         break;
       case 3:
-        pip(0.28, 0.28);
-        pip(0.5, 0.5);
-        pip(0.72, 0.72);
+        dot(0.28, 0.28);
+        dot(0.5, 0.5);
+        dot(0.72, 0.72);
         break;
       case 4:
-        pip(0.32, 0.32);
-        pip(0.68, 0.32);
-        pip(0.32, 0.68);
-        pip(0.68, 0.68);
+        dot(0.32, 0.32);
+        dot(0.68, 0.32);
+        dot(0.32, 0.68);
+        dot(0.68, 0.68);
         break;
       case 5:
-        pip(0.3, 0.3);
-        pip(0.7, 0.3);
-        pip(0.5, 0.5);
-        pip(0.3, 0.7);
-        pip(0.7, 0.7);
+        dot(0.3, 0.3);
+        dot(0.7, 0.3);
+        dot(0.5, 0.5);
+        dot(0.3, 0.7);
+        dot(0.7, 0.7);
         break;
       case 6:
-        pip(0.32, 0.28);
-        pip(0.68, 0.28);
-        pip(0.32, 0.5);
-        pip(0.68, 0.5);
-        pip(0.32, 0.72);
-        pip(0.68, 0.72);
+        dot(0.32, 0.28);
+        dot(0.68, 0.28);
+        dot(0.32, 0.5);
+        dot(0.68, 0.5);
+        dot(0.32, 0.72);
+        dot(0.68, 0.72);
         break;
     }
   }
 
   @override
   bool shouldRepaint(covariant _DicePipsPainter old) =>
-      old.value != value;
+      old.value != value || old.pip != pip;
 }
 
 // ---------------------------------------------------------------------------
 // Pause overlay
 // ---------------------------------------------------------------------------
 class _PauseOverlay extends StatelessWidget {
+  final ParlorThemeDef theme;
   final VoidCallback onResume;
   final VoidCallback onRestart;
   final VoidCallback onQuit;
   final ParlorAudio audio;
   const _PauseOverlay({
+    required this.theme,
     required this.onResume,
     required this.onRestart,
     required this.onQuit,
@@ -547,33 +749,37 @@ class _PauseOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = theme;
     return Container(
-      color: Parlor.shadow.withValues(alpha: 0.72),
+      color: Colors.black.withValues(alpha: 0.72),
       alignment: Alignment.center,
       child: Container(
         width: 300,
         padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 28),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Parlor.walnutMid, Parlor.walnutDeep],
+            colors: [t.woodMid, t.woodDeep],
           ),
-          border: Border.all(color: Parlor.brass, width: 3),
-          boxShadow: const [
+          border: Border.all(color: t.accent, width: 3),
+          boxShadow: [
             BoxShadow(
-                color: Parlor.shadow, offset: Offset(0, 10), blurRadius: 24),
+                color: Colors.black.withValues(alpha: 0.6),
+                offset: const Offset(0, 10),
+                blurRadius: 24),
           ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Paused', style: Parlor.display(28)),
+            Text('Paused', style: Parlor.display(28, theme: t)),
             const SizedBox(height: 20),
             WoodButton(
                 label: 'Resume',
                 width: 220,
+                theme: t,
                 onTap: () {
                   audio.click();
                   onResume();
@@ -582,6 +788,7 @@ class _PauseOverlay extends StatelessWidget {
             WoodButton(
                 label: 'Restart',
                 width: 220,
+                theme: t,
                 onTap: () {
                   audio.click();
                   onRestart();
@@ -590,6 +797,7 @@ class _PauseOverlay extends StatelessWidget {
             WoodButton(
                 label: 'Quit to Menu',
                 width: 220,
+                theme: t,
                 onTap: () {
                   audio.click();
                   onQuit();
@@ -609,57 +817,63 @@ class _GameOverDialog extends StatelessWidget {
   final Color winnerColor;
   final bool humanWon;
   final ParlorAudio audio;
+  final ParlorThemeDef theme;
   const _GameOverDialog({
     required this.winnerName,
     required this.winnerColor,
     required this.humanWon,
     required this.audio,
+    required this.theme,
   });
 
   @override
   Widget build(BuildContext context) {
+    final t = theme;
     return Dialog(
       backgroundColor: Colors.transparent,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 30),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Parlor.walnutMid, Parlor.walnutDeep],
+            colors: [t.woodMid, t.woodDeep],
           ),
-          border: Border.all(color: Parlor.brass, width: 3),
-          boxShadow: const [
+          border: Border.all(color: t.accent, width: 3),
+          boxShadow: [
             BoxShadow(
-                color: Parlor.shadow, offset: Offset(0, 10), blurRadius: 24),
+                color: Colors.black.withValues(alpha: 0.6),
+                offset: const Offset(0, 10),
+                blurRadius: 24),
           ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Winner podium: brass disc with winner token on top
             SizedBox(
               height: 110,
               child: CustomPaint(
-                painter: _PodiumPainter(color: winnerColor),
+                painter: _PodiumPainter(color: winnerColor, theme: t),
               ),
             ),
             const SizedBox(height: 8),
             Text(humanWon ? 'Victory!' : 'Game Over',
-                style: Parlor.display(30)),
+                style: Parlor.display(30, theme: t)),
             const SizedBox(height: 6),
             Text(
               humanWon
                   ? '$winnerName brings all four tokens home. The parlor applauds!'
                   : '$winnerName takes the crown this time.',
-              style: Parlor.body(15, color: Parlor.ivoryDim),
+              style: Parlor.body(15,
+                  theme: t, color: t.ivory.withValues(alpha: 0.8)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 22),
             WoodButton(
               label: 'Play Again',
               width: 220,
+              theme: t,
               onTap: () {
                 audio.click();
                 Navigator.of(context).pop(true);
@@ -669,6 +883,7 @@ class _GameOverDialog extends StatelessWidget {
             WoodButton(
               label: 'Main Menu',
               width: 220,
+              theme: t,
               onTap: () {
                 audio.click();
                 Navigator.of(context).pop(false);
@@ -683,12 +898,13 @@ class _GameOverDialog extends StatelessWidget {
 
 class _PodiumPainter extends CustomPainter {
   final Color color;
-  _PodiumPainter({required this.color});
+  final ParlorThemeDef theme;
+  _PodiumPainter({required this.color, required this.theme});
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = theme;
     final cx = size.width / 2;
-    // brass podium
     final podium = RRect.fromRectAndRadius(
       Rect.fromCenter(center: Offset(cx, 88), width: 150, height: 34),
       const Radius.circular(8),
@@ -696,25 +912,22 @@ class _PodiumPainter extends CustomPainter {
     canvas.drawRRect(
         podium,
         Paint()
-          ..shader = const LinearGradient(
+          ..shader = LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Parlor.brassLight, Parlor.brass, Parlor.brassDark],
+            colors: [t.accentLight, t.accent, t.accentDark],
           ).createShader(podium.outerRect));
     canvas.drawRRect(
         podium,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2
-          ..color = Parlor.shadow.withValues(alpha: 0.5));
-    // glossy winner token with contact shadow
+          ..color = Colors.black.withValues(alpha: 0.5));
     canvas.drawOval(
         Rect.fromCenter(center: Offset(cx, 74), width: 52, height: 12),
-        Paint()..color = Parlor.shadow.withValues(alpha: 0.55));
-    final tokenRect =
-        Rect.fromCircle(center: Offset(cx, 52), radius: 24);
-    canvas.drawCircle(
-        Offset(cx, 52), 24, Paint()..color = color);
+        Paint()..color = Colors.black.withValues(alpha: 0.55));
+    final tokenRect = Rect.fromCircle(center: Offset(cx, 52), radius: 24);
+    canvas.drawCircle(Offset(cx, 52), 24, Paint()..color = color);
     canvas.drawCircle(
         Offset(cx, 52),
         24,
@@ -733,7 +946,7 @@ class _PodiumPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.5
-          ..color = Parlor.shadow.withValues(alpha: 0.45));
+          ..color = Colors.black.withValues(alpha: 0.45));
   }
 
   @override
@@ -741,33 +954,40 @@ class _PodiumPainter extends CustomPainter {
 }
 
 // ---------------------------------------------------------------------------
-// The parlor board painter — physical walnut, brass, glossy tokens.
+// The parlor board painter — theme-aware, token shapes, move animation.
 // ---------------------------------------------------------------------------
 class _ParlorBoardPainter extends CustomPainter {
   final LudoEngine engine;
-  final Animation<double> pulse;
-  _ParlorBoardPainter({required this.engine, required this.pulse})
-      : super(repaint: pulse);
+  final ParlorThemeDef theme;
+  final int tokenShape;
+  final double animProgress;
+  _ParlorBoardPainter({
+    required this.engine,
+    required this.theme,
+    required this.tokenShape,
+    required this.animProgress,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final t = theme;
     final cell = size.width / 15;
     Offset pt(double cu, double ru) => Offset(cu * cell, ru * cell);
 
-    // Board base: dark walnut slab with brass trim and drop shadow.
+    // Board base: wood slab with metal trim and drop shadow.
     final baseRect =
         RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(16));
     canvas.drawRRect(
       baseRect.shift(const Offset(0, 7)),
-      Paint()..color = Parlor.shadow.withValues(alpha: 0.65),
+      Paint()..color = Colors.black.withValues(alpha: 0.65),
     );
     canvas.drawRRect(
       baseRect,
       Paint()
-        ..shader = const LinearGradient(
+        ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF4A2E1B), Parlor.walnutDark, Color(0xFF2A1708)],
+          colors: [t.woodMid, t.woodDark, t.woodDeep],
         ).createShader(Offset.zero & size),
     );
     canvas.drawRRect(
@@ -775,11 +995,11 @@ class _ParlorBoardPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = Parlor.brassDark,
+        ..color = t.accentDark,
     );
 
-    final board = Rect.fromLTWH(
-        cell * 0.35, cell * 0.35, cell * 14.3, cell * 14.3);
+    final board =
+        Rect.fromLTWH(cell * 0.35, cell * 0.35, cell * 14.3, cell * 14.3);
 
     // Bases (quadrant panels).
     for (int i = 0; i < engine.n; i++) {
@@ -789,29 +1009,32 @@ class _ParlorBoardPainter extends CustomPainter {
             .deflate(cell * 0.28),
         Radius.circular(cell * 0.5),
       );
-      // inset panel
       canvas.drawRRect(
           rect.shift(const Offset(0, 3)),
-          Paint()..color = Parlor.shadow.withValues(alpha: 0.5));
+          Paint()..color = Colors.black.withValues(alpha: 0.5));
+      // Current player's base gets a highlight wash.
       canvas.drawRRect(
         rect,
-        Paint()..color = engine.players[i].color.withValues(alpha: 0.22),
+        Paint()
+          ..color = (engine.turn == i && !engine.over
+                  ? engine.players[i].color.withValues(alpha: 0.38)
+                  : engine.players[i].color.withValues(alpha: 0.20)),
       );
       canvas.drawRRect(
         rect,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = engine.players[i].color.withValues(alpha: 0.75),
+          ..strokeWidth = engine.turn == i && !engine.over ? 3 : 2
+          ..color = (engine.turn == i && !engine.over
+              ? t.accentLight
+              : engine.players[i].color.withValues(alpha: 0.75)),
       );
-      // token wells
       for (int k = 0; k < 4; k++) {
         final ctr =
             pt(o[1] + (k % 2 == 0 ? 1.7 : 4.3), o[0] + (k < 2 ? 1.7 : 4.3));
         canvas.drawCircle(ctr + const Offset(0, 2), cell * 0.5,
-            Paint()..color = Parlor.shadow.withValues(alpha: 0.5));
-        canvas.drawCircle(
-            ctr, cell * 0.5, Paint()..color = Parlor.walnutDeep);
+            Paint()..color = Colors.black.withValues(alpha: 0.5));
+        canvas.drawCircle(ctr, cell * 0.5, Paint()..color = t.woodDeep);
         canvas.drawCircle(
             ctr,
             cell * 0.5,
@@ -822,7 +1045,7 @@ class _ParlorBoardPainter extends CustomPainter {
       }
     }
 
-    // Track cells: parchment with beveled edges.
+    // Track cells with beveled edges.
     for (int i = 0; i < 52; i++) {
       final rc = trackCells[i];
       final r = Rect.fromLTWH(rc[1] * cell, rc[0] * cell, cell, cell);
@@ -835,11 +1058,10 @@ class _ParlorBoardPainter extends CustomPainter {
       if (owner >= 0) {
         fill = engine.players[owner].color;
       } else if (isSafe) {
-        fill = const Color(0xFFE4D3A8);
+        fill = t.trackDark;
       } else {
-        fill = const Color(0xFFEFE3C8);
+        fill = t.trackLight;
       }
-      // bevel: light top-left, dark bottom-right
       canvas.drawRect(r.deflate(0.5), Paint()..color = fill);
       canvas.drawLine(
           r.topLeft + const Offset(1, 1), r.topRight + const Offset(-1, 1),
@@ -850,15 +1072,17 @@ class _ParlorBoardPainter extends CustomPainter {
           r.bottomLeft + const Offset(1, -1),
           r.bottomRight + const Offset(-1, -1),
           Paint()
-            ..color = Parlor.shadow.withValues(alpha: 0.28)
+            ..color = Colors.black.withValues(alpha: 0.28)
             ..strokeWidth = 1.2);
-      if (isSafe && owner < 0) {
-        _drawGlyph(canvas, '★', pt(rc[1] + 0.5, rc[0] + 0.5),
-            cell * 0.46, Parlor.brassDark);
-      }
-      if (owner >= 0) {
-        _drawGlyph(canvas, '★', pt(rc[1] + 0.5, rc[0] + 0.5),
-            cell * 0.42, Colors.white.withValues(alpha: 0.85));
+      if (isSafe) {
+        _drawGlyph(
+            canvas,
+            '★',
+            pt(rc[1] + 0.5, rc[0] + 0.5),
+            cell * 0.44,
+            owner >= 0
+                ? Colors.white.withValues(alpha: 0.85)
+                : t.accentDark);
       }
     }
 
@@ -866,11 +1090,8 @@ class _ParlorBoardPainter extends CustomPainter {
     for (int i = 0; i < engine.n; i++) {
       for (final h in homeCols[engine.seats[i]]) {
         final r = Rect.fromLTWH(h[1] * cell, h[0] * cell, cell, cell);
-        canvas.drawRect(
-            r.deflate(0.5),
-            Paint()
-              ..color =
-                  engine.players[i].color.withValues(alpha: 0.55));
+        canvas.drawRect(r.deflate(0.5),
+            Paint()..color = engine.players[i].color.withValues(alpha: 0.55));
         canvas.drawLine(
             r.topLeft + const Offset(1, 1), r.topRight + const Offset(-1, 1),
             Paint()
@@ -879,7 +1100,7 @@ class _ParlorBoardPainter extends CustomPainter {
       }
     }
 
-    // Center home: four triangles + brass trophy medallion.
+    // Center home: four triangles + metal medallion.
     final seatToPlayer = {
       for (int i = 0; i < engine.n; i++) engine.seats[i]: i
     };
@@ -896,59 +1117,196 @@ class _ParlorBoardPainter extends CustomPainter {
         path,
         Paint()
           ..color = pi == null
-              ? const Color(0xFFEFE3C8)
+              ? t.trackLight
               : engine.players[pi].color,
       );
     }
     canvas.drawCircle(c, cell * 0.72,
-        Paint()..color = Parlor.shadow.withValues(alpha: 0.4));
+        Paint()..color = Colors.black.withValues(alpha: 0.4));
     canvas.drawCircle(
         c,
         cell * 0.68,
         Paint()
-          ..shader = const RadialGradient(
-            colors: [Parlor.brassLight, Parlor.brass, Parlor.brassDark],
+          ..shader = RadialGradient(
+            colors: [t.accentLight, t.accent, t.accentDark],
           ).createShader(Rect.fromCircle(center: c, radius: cell * 0.68)));
-    _drawGlyph(canvas, '♛', c, cell * 0.62, Parlor.walnutDeep);
+    _drawGlyph(canvas, '♛', c, cell * 0.62, t.woodDeep);
 
-    // Tokens: contact shadow + glossy lacquered pawn.
+    // Tokens.
     final stacked = <String, int>{};
+    final anim = engine.moveAnim;
     for (int i = 0; i < engine.n; i++) {
       for (int k = 0; k < 4; k++) {
-        var off = tokenUnits(engine.seats, engine.steps, i, k);
+        Offset off;
+        double lift = 0;
+        if (anim != null && anim.pi == i && anim.ti == k) {
+          // Interpolated flight path with a little hop.
+          final step = anim.currentStep;
+          off = tokenUnitsAt(engine.seats, i, k, step);
+          lift = sin(animProgress * pi) * 0.35;
+          if (anim.fromStep < 0) {
+            // Base exit: slide from well to start square.
+            final a = tokenUnitsAt(engine.seats, i, k, -1);
+            final b = tokenUnitsAt(engine.seats, i, k, 0);
+            final e = animProgress.clamp(0.0, 1.0);
+            off = Offset(a.dx + (b.dx - a.dx) * e,
+                a.dy + (b.dy - a.dy) * e - sin(e * pi) * 0.8);
+          }
+        } else {
+          off = tokenUnits(engine.seats, engine.steps, i, k);
+        }
         final key = '${off.dx.toStringAsFixed(1)}_${off.dy.toStringAsFixed(1)}';
         final nst = stacked[key] ?? 0;
         stacked[key] = nst + 1;
         if (nst > 0) {
           off = off + Offset((nst % 2) * 0.42 - 0.21, (nst ~/ 2) * 0.42 - 0.21);
         }
-        final ctr = pt(off.dx, off.dy);
+        var ctr = pt(off.dx, off.dy);
+        ctr = ctr + Offset(0, -lift * cell);
         final finished = engine.steps[i][k] == 56;
         final rad = cell * (finished ? 0.20 : 0.34);
-        // contact shadow
         canvas.drawOval(
           Rect.fromCenter(
               center: ctr + Offset(0, rad * 0.45),
               width: rad * 1.9,
               height: rad * 0.7),
-          Paint()..color = Parlor.shadow.withValues(alpha: 0.5),
+          Paint()..color = Colors.black.withValues(alpha: 0.5),
         );
-        // movable highlight ring
-        if (engine.movable.contains(k) && engine.turn == i) {
+        if (engine.movable.contains(k) &&
+            engine.turn == i &&
+            engine.phase == Phase.awaitingMove) {
           canvas.drawCircle(
             ctr,
             rad + cell * 0.15,
             Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = 3
-              ..color = Parlor.brassLight
-                  .withValues(alpha: 0.55 + 0.45 * pulse.value),
+              ..color = t.accentLight.withValues(alpha: 0.85),
           );
         }
-        // lacquered body
+        _drawToken(canvas, ctr, rad, engine.players[i].color, t);
+      }
+    }
+
+    canvas.drawRect(
+      board,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = t.accent.withValues(alpha: 0.55),
+    );
+  }
+
+  /// Token body per selected shape.
+  void _drawToken(
+      Canvas canvas, Offset ctr, double rad, Color color, ParlorThemeDef t) {
+    switch (tokenShape) {
+      case 1: // Facet Gem — cut diamond.
+        final path = Path()
+          ..moveTo(ctr.dx, ctr.dy - rad * 1.25)
+          ..lineTo(ctr.dx + rad * 0.95, ctr.dy)
+          ..lineTo(ctr.dx, ctr.dy + rad * 1.25)
+          ..lineTo(ctr.dx - rad * 0.95, ctr.dy)
+          ..close();
+        canvas.drawPath(path, Paint()..color = color);
+        // facet lines
+        final facet = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4
+          ..color = Colors.white.withValues(alpha: 0.55);
+        canvas.drawLine(Offset(ctr.dx, ctr.dy - rad * 1.25),
+            Offset(ctr.dx, ctr.dy + rad * 1.25), facet);
+        canvas.drawLine(Offset(ctr.dx - rad * 0.95, ctr.dy),
+            Offset(ctr.dx + rad * 0.95, ctr.dy), facet);
+        canvas.drawLine(
+            Offset(ctr.dx, ctr.dy - rad * 1.25),
+            Offset(ctr.dx + rad * 0.48, ctr.dy),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.2
+              ..color = Colors.white.withValues(alpha: 0.7));
+        canvas.drawPath(
+            path,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = Colors.black.withValues(alpha: 0.45));
+        break;
+      case 2: // Wood Disc — turned wooden cylinder.
         final bodyRect = Rect.fromCircle(center: ctr, radius: rad);
-        canvas.drawCircle(ctr, rad,
-            Paint()..color = engine.players[i].color);
+        canvas.drawCircle(ctr, rad, Paint()..color = const Color(0xFF8A5A2E));
+        // growth rings
+        for (final rr in [0.75, 0.5, 0.28]) {
+          canvas.drawCircle(
+              ctr,
+              rad * rr,
+              Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1.3
+                ..color = const Color(0xFF5A3A1A).withValues(alpha: 0.7));
+        }
+        // colored inlay dot
+        canvas.drawCircle(ctr, rad * 0.30, Paint()..color = color);
+        canvas.drawCircle(
+            ctr,
+            rad,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.4
+              ..color = t.accentDark);
+        // top sheen
+        canvas.drawCircle(
+            ctr,
+            rad,
+            Paint()
+              ..shader = RadialGradient(
+                center: const Alignment(-0.4, -0.5),
+                radius: 1.1,
+                colors: [
+                  Colors.white.withValues(alpha: 0.35),
+                  Colors.white.withValues(alpha: 0.0),
+                ],
+              ).createShader(bodyRect));
+        break;
+      case 3: // Marble — swirled glass.
+        final bodyRect = Rect.fromCircle(center: ctr, radius: rad);
+        canvas.drawCircle(ctr, rad, Paint()..color = color);
+        // swirl
+        canvas.drawArc(
+            Rect.fromCircle(center: ctr, radius: rad * 0.62),
+            -0.6,
+            3.6,
+            false,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = rad * 0.22
+              ..strokeCap = StrokeCap.round
+              ..color = Colors.white.withValues(alpha: 0.45));
+        canvas.drawCircle(
+            ctr,
+            rad,
+            Paint()
+              ..shader = RadialGradient(
+                center: const Alignment(-0.45, -0.55),
+                radius: 1.15,
+                colors: [
+                  Colors.white.withValues(alpha: 0.65),
+                  Colors.white.withValues(alpha: 0.0),
+                  Colors.black.withValues(alpha: 0.30),
+                ],
+                stops: const [0.0, 0.45, 1.0],
+              ).createShader(bodyRect));
+        canvas.drawCircle(
+            ctr,
+            rad,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6
+              ..color = Colors.black.withValues(alpha: 0.4));
+        break;
+      default: // Royal Orb — glossy lacquered pawn orb.
+        final bodyRect = Rect.fromCircle(center: ctr, radius: rad);
+        canvas.drawCircle(ctr, rad, Paint()..color = color);
         canvas.drawCircle(
             ctr,
             rad,
@@ -959,40 +1317,29 @@ class _ParlorBoardPainter extends CustomPainter {
                 colors: [
                   Colors.white.withValues(alpha: 0.55),
                   Colors.white.withValues(alpha: 0.0),
-                  Parlor.shadow.withValues(alpha: 0.25),
+                  Colors.black.withValues(alpha: 0.25),
                 ],
                 stops: const [0.0, 0.45, 1.0],
               ).createShader(bodyRect));
-        // rim
         canvas.drawCircle(
             ctr,
             rad,
             Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = 2
-              ..color = Parlor.shadow.withValues(alpha: 0.5));
-        // pip dot for readability
+              ..color = Colors.black.withValues(alpha: 0.5));
         canvas.drawCircle(
             ctr + Offset(-rad * 0.25, -rad * 0.25),
             rad * 0.22,
             Paint()..color = Colors.white.withValues(alpha: 0.75));
-      }
     }
-
-    // Inner brass frame line.
-    canvas.drawRect(
-      board,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = Parlor.brass.withValues(alpha: 0.55),
-    );
   }
 
   void _drawGlyph(
       Canvas canvas, String glyph, Offset center, double size, Color color) {
     final tp = TextPainter(
-      text: TextSpan(text: glyph, style: TextStyle(fontSize: size, color: color)),
+      text:
+          TextSpan(text: glyph, style: TextStyle(fontSize: size, color: color)),
       textDirection: TextDirection.ltr,
     )..layout();
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
