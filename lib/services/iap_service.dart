@@ -5,17 +5,17 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 /// Real Play Billing store for Ludo: Pro unlock + tip jar.
 ///
 /// Product IDs (the user creates these in Play Console):
-/// - `ludo_pro` — one-time NON-CONSUMABLE: unlocks Pro forever.
-/// - `buy_me_a_coffee` — CONSUMABLE tip.
-/// - `buy_me_a_chocolate` — CONSUMABLE tip.
+/// - `ludopro` — one-time NON-CONSUMABLE: unlocks Pro forever.
+/// - `ludocoffee` — CONSUMABLE tip.
+/// - `ludochocolate` — CONSUMABLE tip.
 ///
 /// Until the products exist in Play Console (or on any store error) the
 /// service exposes [storeReady] = false and the UI shows an honest
 /// "available after store setup" state — never a fake buy button.
 class StoreService {
-  static const proId = 'ludo_pro';
-  static const coffeeId = 'buy_me_a_coffee';
-  static const chocolateId = 'buy_me_a_chocolate';
+  static const proId = 'ludopro';
+  static const coffeeId = 'ludocoffee';
+  static const chocolateId = 'ludochocolate';
   static const productIds = {proId, coffeeId, chocolateId};
 
   final InAppPurchase _iap = InAppPurchase.instance;
