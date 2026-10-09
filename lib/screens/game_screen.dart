@@ -324,7 +324,7 @@ class _GameScreenState extends State<GameScreen>
       case Phase.animating:
         return '';
       case Phase.settling:
-        return engine.banner;
+        return _e.banner;
       case Phase.over:
         return '';
     }
