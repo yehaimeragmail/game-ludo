@@ -1,0 +1,20 @@
+name: iOS build (no codesign, preparation only)
+on:
+  workflow_dispatch:
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Runner-app-no-codesign
+          path: build/ios/iphoneos/Runner.app
+          if-no-files-found: error
+      # Signing / IPA creation is BLOCKED until Wajiha signs in to Apple and provides certificates/profiles.
+      # No paid service is used. This workflow is for public repos only, as instructed.
