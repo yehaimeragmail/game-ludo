@@ -1,20 +1,210 @@
-name: iOS build (no codesign, preparation only)
+# Signed iOS build — shared workflow for all 100 board games (Ludo pilot first)
+#
+# WHAT IT DOES
+#   Builds a SIGNED .ipa on a macOS runner using the ONE shared Apple
+#   Distribution certificate (.p12) + the per-game App Store provisioning
+#   profile. The App Store Connect API key (.p8) is installed so Xcode /
+#   App Store Connect tooling can authenticate; the profile is the primary
+#   signing route (manual signing). No secrets are ever printed.
+#
+# REQUIRED GITHUB SECRETS (same names in every game repo):
+#   APPLE_DISTRIBUTION_P12          base64 of the shared .p12 (one cert, all games)
+#   APPLE_DISTRIBUTION_P12_PASSWORD password for that .p12
+#   APPLE_PROVISIONING_PROFILE      base64 of THIS game's App Store .mobileprovision
+#   APP_STORE_CONNECT_API_KEY_ID    Key ID of the App Store Connect API key
+#   APP_STORE_CONNECT_API_KEY_P8    base64 of the AuthKey .p8 file
+#   APP_STORE_CONNECT_ISSUER_ID     Issuer ID of the API key
+# If ANY secret is missing the job FAILS LOUDLY in the first step, naming
+# only the secret NAME (never a value).
+#
+# WHY MANUAL SIGNING WITH xcodebuild OVERRIDES
+#   The Flutter Xcode projects ship with CODE_SIGN_STYLE = Automatic and no
+#   DEVELOPMENT_TEAM set, so `flutter build ipa` alone cannot sign them.
+#   This workflow therefore runs `flutter build ios --release --no-codesign`
+#   (to generate the Flutter artefacts) and then signs explicitly with
+#   `xcodebuild archive` + `xcodebuild -exportArchive`, passing the team,
+#   identity and profile as command-line overrides. Team ID, profile name
+#   and Bundle ID are all read from the decoded provisioning profile itself,
+#   so this ONE file works unchanged for every game once that game's own
+#   profile secret is saved in its repo. Nothing is hard-coded per game.
+#
+# GAMES 2-100: each game needs its OWN App Store provisioning profile for
+# its OWN Bundle ID before this workflow can run for it (see
+# PROFILE_NEEDS_99.md). The .p12, API key and issuer are shared; only the
+# profile secret differs per repo.
+#
+# DOES NOT: upload to App Store Connect / TestFlight, submit anything, or
+# push anything. It only produces the signed .ipa as a workflow artifact.
+
+name: iOS build (signed IPA)
+
 on:
   workflow_dispatch:
+
 jobs:
-  build-ios:
+  build-signed-ipa:
     runs-on: macos-latest
+    env:
+      KEYCHAIN_NAME: signing_temp.keychain
+      KEYCHAIN_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check all signing secrets are present (fail loudly if not)
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for s in APPLE_DISTRIBUTION_P12 APPLE_DISTRIBUTION_P12_PASSWORD APPLE_PROVISIONING_PROFILE APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_API_KEY_P8 APP_STORE_CONNECT_ISSUER_ID; do
+            if [ -z "${!s:-}" ]; then missing+=("$s"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required signing secret(s): ${missing[*]}"
+            echo "Save the missing secret(s) in this repo (Settings > Secrets and variables > Actions) and re-run."
+            exit 1
+          fi
+          echo "All 6 signing secrets are present (names only — values are never printed)."
+        env:
+          APPLE_DISTRIBUTION_P12: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+
       - run: flutter pub get
-      - run: flutter build ios --release --no-codesign
-      - uses: actions/upload-artifact@v4
+
+      - name: Decode signing files (profile, certificate, API key)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/signing" ~/private_keys ~/Library/MobileDevice/"Provisioning Profiles"
+          echo "$APPLE_DISTRIBUTION_P12" | base64 --decode > "$RUNNER_TEMP/signing/certificate.p12"
+          echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$RUNNER_TEMP/signing/profile.mobileprovision"
+          echo "$APP_STORE_CONNECT_API_KEY_P8" | base64 --decode > "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          # Read team, profile name, UUID and Bundle ID out of the profile itself.
+          python3 - "$RUNNER_TEMP/signing/profile.mobileprovision" <<'PYEOF'
+          import plistlib, subprocess, sys
+          raw = subprocess.run(
+              ["security", "cms", "-D", "-i", sys.argv[1]],
+              capture_output=True, check=True).stdout
+          d = plistlib.loads(raw)
+          team = d["TeamIdentifier"][0]
+          name = d["Name"]
+          uuid = d["UUID"]
+          app_id = d["Entitlements"]["application-identifier"]  # "<TeamID>.<bundle-id>"
+          bundle_id = app_id.split(".", 1)[1]
+          with open("signing-info.env", "w") as f:
+              f.write(f"TEAM_ID={team}\nPROFILE_NAME={name}\nPROFILE_UUID={uuid}\nBUNDLE_ID={bundle_id}\n")
+          print(f"Profile: {name} | Team: {team} | Bundle ID: {bundle_id} | UUID: {uuid}")
+          PYEOF
+          cp "$RUNNER_TEMP/signing/profile.mobileprovision" \
+             "$HOME/Library/MobileDevice/Provisioning Profiles/$(grep PROFILE_UUID signing-info.env | cut -d= -f2).mobileprovision"
+          echo "Signing files decoded and profile installed."
+        env:
+          APPLE_DISTRIBUTION_P12: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+
+      - name: Verify profile Bundle ID matches this project
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source signing-info.env
+          project_id=$(grep -m1 'PRODUCT_BUNDLE_IDENTIFIER = ' ios/Runner.xcodeproj/project.pbxproj \
+            | sed -E 's/.*= ([^;]+);/\1/' | tr -d ' ')
+          echo "Profile Bundle ID: $BUNDLE_ID"
+          echo "Project Bundle ID: $project_id"
+          if [ "$BUNDLE_ID" != "$project_id" ]; then
+            echo "::error::Provisioning profile is for $BUNDLE_ID but this project is $project_id. Save the correct profile secret for this game."
+            exit 1
+          fi
+
+      - name: Import distribution certificate into a temporary keychain
+        shell: bash
+        run: |
+          set -euo pipefail
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_NAME"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security import "$RUNNER_TEMP/signing/certificate.p12" \
+            -k "$KEYCHAIN_NAME" -P "$KEYCHAIN_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security list-keychains -d user -s "$KEYCHAIN_NAME" login.keychain-db
+          security find-identity -v -p codesigning "$KEYCHAIN_NAME" | grep -i "Apple Distribution" \
+            || { echo "::error::No Apple Distribution identity found in the imported .p12."; exit 1; }
+          echo "Distribution certificate imported."
+
+      - name: Generate ExportOptions.plist from the profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source signing-info.env
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string>
+            </dict>
+            <key>stripSwiftSymbols</key><true/>
+          </dict>
+          </plist>
+          EOF
+          echo "ExportOptions.plist written for $BUNDLE_ID with profile '$PROFILE_NAME'."
+
+      - name: Build Flutter artefacts (unsigned), then signed archive + IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source signing-info.env
+          flutter build ios --release --no-codesign
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner -configuration Release \
+            -archivePath build/Runner.xcarchive archive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+          xcodebuild -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportPath build/ios/ipa \
+            -exportOptionsPlist ExportOptions.plist \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" \
+            -authenticationKeyID "${APP_STORE_CONNECT_API_KEY_ID}" \
+            -authenticationKeyIssuerID "${APP_STORE_CONNECT_ISSUER_ID}"
+          ls -lh build/ios/ipa/
+          test -n "$(ls build/ios/ipa/*.ipa 2>/dev/null)" \
+            || { echo "::error::No .ipa was produced by the export step."; exit 1; }
+          echo "Signed .ipa produced."
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
         with:
-          name: Runner-app-no-codesign
-          path: build/ios/iphoneos/Runner.app
+          name: signed-ipa
+          path: build/ios/ipa/*.ipa
           if-no-files-found: error
-      # Signing / IPA creation is BLOCKED until Wajiha signs in to Apple and provides certificates/profiles.
-      # No paid service is used. This workflow is for public repos only, as instructed.
+
+      - name: Clean up signing keychain
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$KEYCHAIN_NAME" || true
+          rm -f "$RUNNER_TEMP/signing/certificate.p12" signing-info.env ExportOptions.plist || true
