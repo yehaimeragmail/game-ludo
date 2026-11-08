@@ -89,7 +89,7 @@ jobs:
           chmod 600 "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
           # Read team, profile name, UUID and Bundle ID out of the profile itself.
           python3 - "$RUNNER_TEMP/signing/profile.mobileprovision" <<'PYEOF'
-          import plistlib, subprocess, sys
+          import plistlib, shlex, subprocess, sys
           raw = subprocess.run(
               ["security", "cms", "-D", "-i", sys.argv[1]],
               capture_output=True, check=True).stdout
@@ -99,12 +99,17 @@ jobs:
           uuid = d["UUID"]
           app_id = d["Entitlements"]["application-identifier"]  # "<TeamID>.<bundle-id>"
           bundle_id = app_id.split(".", 1)[1]
+          # shlex.quote every value: profile names contain spaces
+          # ("Ludo App Store Profile") and an unquoted write makes
+          # `source signing-info.env` fail with "App: command not found".
           with open("signing-info.env", "w") as f:
-              f.write(f"TEAM_ID={team}\nPROFILE_NAME={name}\nPROFILE_UUID={uuid}\nBUNDLE_ID={bundle_id}\n")
+              f.write(f"TEAM_ID={shlex.quote(team)}\nPROFILE_NAME={shlex.quote(name)}\nPROFILE_UUID={shlex.quote(uuid)}\nBUNDLE_ID={shlex.quote(bundle_id)}\n")
           print(f"Profile: {name} | Team: {team} | Bundle ID: {bundle_id} | UUID: {uuid}")
           PYEOF
+          # shellcheck disable=SC1091
+          source signing-info.env
           cp "$RUNNER_TEMP/signing/profile.mobileprovision" \
-             "$HOME/Library/MobileDevice/Provisioning Profiles/$(grep PROFILE_UUID signing-info.env | cut -d= -f2).mobileprovision"
+             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
           echo "Signing files decoded and profile installed."
         env:
           APPLE_DISTRIBUTION_P12: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
