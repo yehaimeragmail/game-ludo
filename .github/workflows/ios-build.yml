@@ -38,8 +38,12 @@
 # PROFILE_NEEDS_99.md). The .p12, API key and issuer are shared; only the
 # profile secret differs per repo.
 #
-# DOES NOT: upload to App Store Connect / TestFlight, submit anything, or
-# push anything. It only produces the signed .ipa as a workflow artifact.
+# DOES: build the signed .ipa AND upload it to TestFlight (App Store
+# Connect) with `xcrun altool` using the same App Store Connect API key.
+# It does NOT submit anything for App Store review or release anything.
+# TestFlight group / tester invitation is done afterwards in App Store
+# Connect (first external build needs Beta App Review before the invite
+# can go out).
 
 name: iOS build (signed IPA)
 
@@ -286,6 +290,23 @@ jobs:
           name: signed-ipa
           path: build/ios/ipa/*.ipa
           if-no-files-found: error
+
+      - name: Upload signed IPA to TestFlight
+        shell: bash
+        run: |
+          set -euo pipefail
+          # altool looks for AuthKey_<key-id>.p8 in the current directory,
+          # so run it from the folder the decode step installed it in.
+          IPA=$(ls build/ios/ipa/*.ipa | head -n1)
+          echo "Uploading $IPA to TestFlight..."
+          cd "$HOME/private_keys"
+          xcrun altool --upload-app -f "$GITHUB_WORKSPACE/$IPA" -t ios \
+            --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+          echo "IPA uploaded to App Store Connect (TestFlight processing starts now)."
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
 
       - name: Clean up signing keychain
         if: always()
