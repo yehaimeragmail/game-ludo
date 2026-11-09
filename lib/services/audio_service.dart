@@ -1,9 +1,16 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:audioplayers/audioplayers.dart';
 
 /// Procedural audio for Ludo — all sounds synthesized in code as WAV bytes.
 /// No asset files. Warm, physical, parlor-appropriate sounds.
+///
+/// Clips play from real temp .wav files (see _writeFile): iOS
+/// (audioplayers_darwin) does NOT implement BytesSource, so every
+/// BytesSource play fails silently on iOS while Android plays it fine.
+/// Files played via DeviceFileSource work on both platforms.
 ///
 /// Reliability design (every call is safe to repeat and safe to overlap):
 /// - Music clips are synthesized ONCE and cached; starting music never blocks
@@ -29,6 +36,41 @@ class ParlorAudio {
   // Cache synthesized clips so we only build them once.
   final Map<String, Uint8List> _cache = {};
 
+  // Synthesized clips written out as real .wav files (see _writeFile).
+  final Map<String, String> _fileCache = {};
+  Directory? _audioDir;
+
+  Future<Directory> _tempDir() async =>
+      _audioDir ??= await Directory.systemTemp.createTemp('ludo_audio');
+
+  /// Write synthesized bytes to a temp .wav file once, return its path.
+  Future<String> _writeFile(String key, Uint8List bytes) async {
+    final existing = _fileCache[key];
+    if (existing != null) return existing;
+    final file = File('${(await _tempDir()).path}/$key.wav');
+    await file.writeAsBytes(bytes, flush: true);
+    _fileCache[key] = file.path;
+    return file.path;
+  }
+
+  Future<String> _clipFile(String key, List<double> Function() build) async =>
+      _writeFile(key, _clip(key, build));
+
+  /// iOS audio session: playback category so sounds play even with the
+  /// silent switch on. Safe to call repeatedly; errors are swallowed.
+  Future<void> _configureSession() async {
+    try {
+      await AudioPlayer.global.setAudioContext(
+        AudioContext(
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.playback,
+            options: {AVAudioSessionOptions.mixWithOthers},
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
   // Music state machine. [_musicGen] is bumped by every start/stop request;
   // async work checks it still owns the latest generation before touching
   // the player, so overlapping requests can never desync the music.
@@ -41,14 +83,19 @@ class ParlorAudio {
   ParlorAudio() {
     // Fire-and-forget is fine here: configure() runs before any play.
     _music.setReleaseMode(ReleaseMode.loop);
+    _configureSession();
   }
 
-  void configure(
-      {required bool musicOn, required bool sfxOn, required double volume}) {
+  void configure({
+    required bool musicOn,
+    required bool sfxOn,
+    required double volume,
+  }) {
     this.musicOn = musicOn;
     this.sfxOn = sfxOn;
     volume = volume.clamp(0.0, 1.0);
     this.volume = volume;
+    _configureSession();
     _music.setVolume(musicOn ? volume * 0.55 : 0.0);
     _sfx.setVolume(sfxOn ? volume : 0.0);
     if (!musicOn) {
@@ -60,8 +107,8 @@ class ParlorAudio {
   Future<void> prewarm() async {
     if (_disposed) return;
     await Future(() {});
-    _menuBytes();
-    _gameBytes();
+    await _writeFile('music_menu', _menuBytes());
+    await _writeFile('music_game', _gameBytes());
   }
 
   // ---------------------------------------------------------- WAV synthesis
@@ -101,15 +148,21 @@ class ParlorAudio {
     return a * d;
   }
 
-  List<double> _tone(double freq, double secs,
-      {double freqEnd = 0, double attack = 0.02, double harmonics = 0.25}) {
+  List<double> _tone(
+    double freq,
+    double secs, {
+    double freqEnd = 0,
+    double attack = 0.02,
+    double harmonics = 0.25,
+  }) {
     final n = (_rate * secs).round();
     final out = List<double>.filled(n, 0);
     for (int i = 0; i < n; i++) {
       final t = i / _rate;
       final f = freqEnd > 0 ? freq + (freqEnd - freq) * (i / n) : freq;
       final ph = 2 * pi * f * t;
-      out[i] = _env(i, n, attack: attack) *
+      out[i] =
+          _env(i, n, attack: attack) *
           (sin(ph) + harmonics * sin(2 * ph) + harmonics * 0.5 * sin(3 * ph));
     }
     return out;
@@ -121,7 +174,8 @@ class ParlorAudio {
     final out = List<double>.filled(n, 0);
     for (int i = 0; i < n; i++) {
       final t = i / _rate;
-      out[i] = _env(i, n, attack: 0.005) *
+      out[i] =
+          _env(i, n, attack: 0.005) *
           (0.9 * sin(2 * pi * 170 * t) * exp(-t * 30) +
               0.5 * sin(2 * pi * 340 * t) * exp(-t * 55) +
               0.25 * (_rand.nextDouble() * 2 - 1) * exp(-t * 120));
@@ -137,7 +191,8 @@ class ParlorAudio {
       final len = (_rate * 0.05).round();
       for (int i = 0; i < len && start + i < n; i++) {
         final t = i / _rate;
-        out[start + i] += (_rand.nextDouble() * 2 - 1) *
+        out[start + i] +=
+            (_rand.nextDouble() * 2 - 1) *
             exp(-t * 90) *
             (0.5 + 0.5 * sin(2 * pi * 900 * t));
       }
@@ -176,74 +231,71 @@ class ParlorAudio {
       _cache.putIfAbsent(key, () => _wav(build()));
 
   Uint8List _menuBytes() => _clip('music_menu', () {
-        // Warm Am – F – C – G parlor pad, 16s loop.
-        final seq = [
-          [220.0, 261.63, 329.63], // Am
-          [174.61, 220.0, 261.63], // F
-          [261.63, 329.63, 392.0], // C
-          [196.0, 246.94, 293.66], // G
-        ];
-        final out = <double>[];
-        for (final chord in seq) {
-          out.addAll(_padChord(chord, 4.0));
-        }
-        return out;
-      });
+    // Warm Am – F – C – G parlor pad, 16s loop.
+    final seq = [
+      [220.0, 261.63, 329.63], // Am
+      [174.61, 220.0, 261.63], // F
+      [261.63, 329.63, 392.0], // C
+      [196.0, 246.94, 293.66], // G
+    ];
+    final out = <double>[];
+    for (final chord in seq) {
+      out.addAll(_padChord(chord, 4.0));
+    }
+    return out;
+  });
 
   Uint8List _gameBytes() => _clip('music_game', () {
-        // Gentle pentatonic plucks over a soft drone, 12s loop.
-        final drone = _padChord([130.81, 196.0], 12.0);
-        final plucks = [
-          392.0,
-          440.0,
-          523.25,
-          587.33,
-          523.25,
-          440.0,
-          392.0,
-          329.63
-        ];
-        final n = (_rate * 12).round();
-        final out = List<double>.from(drone);
-        for (int k = 0; k < plucks.length; k++) {
-          final start = (n * k / plucks.length).round();
-          final tone = _tone(plucks[k], 0.5, harmonics: 0.35);
-          for (int i = 0; i < tone.length && start + i < n; i++) {
-            out[start + i] += tone[i] * 0.35;
-          }
-        }
-        return out;
-      });
+    // Gentle pentatonic plucks over a soft drone, 12s loop.
+    final drone = _padChord([130.81, 196.0], 12.0);
+    final plucks = [392.0, 440.0, 523.25, 587.33, 523.25, 440.0, 392.0, 329.63];
+    final n = (_rate * 12).round();
+    final out = List<double>.from(drone);
+    for (int k = 0; k < plucks.length; k++) {
+      final start = (n * k / plucks.length).round();
+      final tone = _tone(plucks[k], 0.5, harmonics: 0.35);
+      for (int i = 0; i < tone.length && start + i < n; i++) {
+        out[start + i] += tone[i] * 0.35;
+      }
+    }
+    return out;
+  });
 
   // ------------------------------------------------------------------ SFX
-  Future<void> _play(Uint8List bytes) async {
+  Future<void> _play(String key, List<double> Function() build) async {
     if (!sfxOn || _disposed) return;
     try {
-      await _sfx.play(BytesSource(bytes));
+      await _sfx.play(DeviceFileSource(await _clipFile(key, build)));
     } catch (_) {}
   }
 
-  Future<void> click() => _play(_clip('click', () => _tone(1150, 0.06)));
-  Future<void> dice() => _play(_clip('dice', _diceRattle));
-  Future<void> move() => _play(_clip('move', _knock));
+  Future<void> click() => _play('click', () => _tone(1150, 0.06));
+  Future<void> dice() => _play('dice', _diceRattle);
+  Future<void> move() => _play('move', _knock);
   Future<void> invalid() =>
-      _play(_clip('invalid', () => _tone(150, 0.16, harmonics: 0.5)));
+      _play('invalid', () => _tone(150, 0.16, harmonics: 0.5));
   Future<void> gameStart() =>
-      _play(_clip('start', () => _tone(420, 0.32, freqEnd: 840)));
+      _play('start', () => _tone(420, 0.32, freqEnd: 840));
   Future<void> capture() =>
-      _play(_clip('capture', () => _tone(620, 0.28, freqEnd: 150)));
+      _play('capture', () => _tone(620, 0.28, freqEnd: 150));
   Future<void> tokenHome() =>
-      _play(_clip('home', () => _tone(520, 0.2, freqEnd: 780)));
-  Future<void> win() => _play(_clip(
-      'win', () => _arp([523.25, 659.25, 783.99, 1046.5, 1318.5], 0.16, 0.03)));
-  Future<void> lose() => _play(
-      _clip('lose', () => _arp([392.0, 329.63, 261.63, 196.0], 0.22, 0.04)));
+      _play('home', () => _tone(520, 0.2, freqEnd: 780));
+  Future<void> win() => _play(
+    'win',
+    () => _arp([523.25, 659.25, 783.99, 1046.5, 1318.5], 0.16, 0.03),
+  );
+  Future<void> lose() =>
+      _play('lose', () => _arp([392.0, 329.63, 261.63, 196.0], 0.22, 0.04));
 
   // ----------------------------------------------------------------- music
   /// Start (or keep) a music track. Generation-serialized: the latest request
   /// always wins; a start issued while an older one is in flight is never
   /// dropped. Re-requesting the current track just ensures it is audible.
-  Future<void> _startTrack(String track, Uint8List Function() bytes) async {
+  Future<void> _startTrack(
+    String track,
+    String fileKey,
+    Uint8List Function() bytes,
+  ) async {
     if (_disposed) return;
     final gen = ++_musicGen;
     if (_currentTrack == track && !_pausedByLifecycle) {
@@ -264,7 +316,7 @@ class ParlorAudio {
       if (gen != _musicGen || _disposed || !musicOn) return;
       _currentTrack = track;
       _pausedByLifecycle = false;
-      await _music.play(BytesSource(bytes()));
+      await _music.play(DeviceFileSource(await _writeFile(fileKey, bytes())));
     } catch (_) {
       if (gen == _musicGen) _currentTrack = null;
     } finally {
@@ -272,8 +324,10 @@ class ParlorAudio {
     }
   }
 
-  Future<void> startMenuMusic() => _startTrack('menu', _menuBytes);
-  Future<void> startGameMusic() => _startTrack('game', _gameBytes);
+  Future<void> startMenuMusic() =>
+      _startTrack('menu', 'music_menu', _menuBytes);
+  Future<void> startGameMusic() =>
+      _startTrack('game', 'music_game', _gameBytes);
 
   /// App-scoped stop: cancels any pending start, then stops. Used only when
   /// the user turns music OFF — never on screen navigation.
@@ -323,6 +377,9 @@ class ParlorAudio {
     try {
       await _sfx.dispose();
       await _music.dispose();
+    } catch (_) {}
+    try {
+      await _audioDir?.delete(recursive: true);
     } catch (_) {}
   }
 }
