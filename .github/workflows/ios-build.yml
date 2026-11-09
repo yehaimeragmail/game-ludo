@@ -96,9 +96,14 @@ jobs:
           # password Wajiha typed into the GitHub secret (never in a browser).
           # The .cer is DER, so convert it to PEM first — openssl pkcs12
           # will not read a DER certificate directly.
+          # -legacy is REQUIRED: OpenSSL 3's default PKCS#12 (AES-256 +
+          # PBKDF2) is rejected by macOS `security import` with "MAC
+          # verification failed during PKCS12 import (wrong password?)" even
+          # when the password is right (run #7, 9 Nov 2026). The legacy
+          # 3DES/SHA-1 format is what macOS accepts.
           openssl x509 -inform DER -in "$RUNNER_TEMP/signing/certificate.cer" \
             -out "$RUNNER_TEMP/signing/certificate.pem"
-          openssl pkcs12 -export \
+          openssl pkcs12 -export -legacy \
             -in "$RUNNER_TEMP/signing/certificate.pem" \
             -inkey "$RUNNER_TEMP/signing/private.key" \
             -out "$RUNNER_TEMP/signing/certificate.p12" \
