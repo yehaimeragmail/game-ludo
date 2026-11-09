@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:share_plus/share_plus.dart';
+
 import '../engine/ludo_engine.dart';
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
@@ -15,7 +17,7 @@ import 'settings_screen.dart';
 
 /// Main menu — Artisan Parlor edition.
 /// Logo, PLAY, mode setup (players / bots / difficulty), theme picker,
-/// player renaming, tip jar, settings.
+/// player renaming, tip jar (Android only), settings.
 class MenuScreen extends StatefulWidget {
   final ParlorAudio audio;
   final ParlorSettings settings;
@@ -30,7 +32,8 @@ class _MenuScreenState extends State<MenuScreen> {
   final StoreService _store = StoreService();
 
   ParlorSettings get _s => widget.settings;
-  ParlorThemeDef get _t => ParlorThemes.byId(_s.themeId, custom: _s.customTheme);
+  ParlorThemeDef get _t =>
+      ParlorThemes.byId(_s.themeId, custom: _s.customTheme);
 
   @override
   void initState() {
@@ -106,16 +109,15 @@ class _MenuScreenState extends State<MenuScreen> {
     // App-scoped music: keep playing across screens. GameScreen switches
     // to the game track on entry; we switch back to menu music on return.
     Navigator.of(context)
-        .push(MaterialPageRoute(
-      builder: (_) => GameScreen(
-        engine: engine,
-        audio: widget.audio,
-        settings: _s,
-      ),
-    ))
+        .push(
+          MaterialPageRoute(
+            builder: (_) =>
+                GameScreen(engine: engine, audio: widget.audio, settings: _s),
+          ),
+        )
         .then((_) {
-      if (mounted) widget.audio.startMenuMusic();
-    });
+          if (mounted) widget.audio.startMenuMusic();
+        });
   }
 
   @override
@@ -129,8 +131,7 @@ class _MenuScreenState extends State<MenuScreen> {
           child: ListenableBuilder(
             listenable: _s,
             builder: (_, _) => SingleChildScrollView(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
               child: Column(
                 children: [
                   const SizedBox(height: 8),
@@ -150,8 +151,10 @@ class _MenuScreenState extends State<MenuScreen> {
                       ],
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child:
-                        Image.asset('assets/ludo_logo.png', fit: BoxFit.cover),
+                    child: Image.asset(
+                      'assets/ludo_logo.png',
+                      fit: BoxFit.cover,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text('Ludo', style: Parlor.display(46, theme: t)),
@@ -161,30 +164,37 @@ class _MenuScreenState extends State<MenuScreen> {
                   ),
                   const SizedBox(height: 22),
                   WoodButton(
-                      label: '▶  Play', onTap: _play, theme: t, width: 260),
+                    label: '▶  Play',
+                    onTap: _play,
+                    theme: t,
+                    width: 260,
+                  ),
                   const SizedBox(height: 12),
                   GestureDetector(
                     onTap: () {
                       widget.audio.click();
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => ProScreen(
-                          audio: widget.audio,
-                          settings: _s,
-                          store: _store,
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ProScreen(
+                            audio: widget.audio,
+                            settings: _s,
+                            store: _store,
+                          ),
                         ),
-                      ));
+                      );
                     },
                     child: Container(
                       width: 260,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14),
-                        gradient: LinearGradient(colors: [
-                          t.accent.withValues(alpha: 0.9),
-                          t.accentDark,
-                        ]),
-                        border: Border.all(
-                            color: t.accentLight, width: 2.5),
+                        gradient: LinearGradient(
+                          colors: [
+                            t.accent.withValues(alpha: 0.9),
+                            t.accentDark,
+                          ],
+                        ),
+                        border: Border.all(color: t.accentLight, width: 2.5),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.5),
@@ -196,8 +206,7 @@ class _MenuScreenState extends State<MenuScreen> {
                       alignment: Alignment.center,
                       child: Text(
                         _s.isPro ? '✦  PRO ACTIVE' : '✦  Get PRO',
-                        style: Parlor.label(17,
-                            theme: t, color: t.woodDeep),
+                        style: Parlor.label(17, theme: t, color: t.woodDeep),
                       ),
                     ),
                   ),
@@ -208,8 +217,11 @@ class _MenuScreenState extends State<MenuScreen> {
                   const SizedBox(height: 14),
                   _NamesCard(theme: t),
                   const SizedBox(height: 14),
-                  _SupportCard(theme: t, store: _store),
-                  const SizedBox(height: 14),
+                  // Tip jar is Android-only: hidden on iOS (App Store).
+                  if (defaultTargetPlatform != TargetPlatform.iOS) ...[
+                    _SupportCard(theme: t, store: _store),
+                    const SizedBox(height: 14),
+                  ],
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -221,7 +233,8 @@ class _MenuScreenState extends State<MenuScreen> {
                           widget.audio.click();
                           // ignore: deprecated_member_use
                           await Share.share(
-                              'Play Ludo with me! https://play.google.com/store/apps/details?id=com.gameswajiha.ludo');
+                            'Play Ludo with me! https://play.google.com/store/apps/details?id=com.gameswajiha.ludo',
+                          );
                         },
                       ),
                       const SizedBox(width: 22),
@@ -241,12 +254,14 @@ class _MenuScreenState extends State<MenuScreen> {
                         label: 'Settings',
                         onTap: () async {
                           widget.audio.click();
-                          await Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => SettingsScreen(
-                              audio: widget.audio,
-                              settings: _s,
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SettingsScreen(
+                                audio: widget.audio,
+                                settings: _s,
+                              ),
                             ),
-                          ));
+                          );
                           if (mounted) setState(() {});
                         },
                       ),
@@ -272,11 +287,17 @@ class _MenuScreenState extends State<MenuScreen> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Image.asset('assets/wajiha_logo.png',
-                          width: 22, height: 22, fit: BoxFit.contain),
+                      Image.asset(
+                        'assets/wajiha_logo.png',
+                        width: 22,
+                        height: 22,
+                        fit: BoxFit.contain,
+                      ),
                       const SizedBox(width: 8),
-                      Text('Credits: WAJIHA',
-                          style: Parlor.label(12, theme: t)),
+                      Text(
+                        'Credits: WAJIHA',
+                        style: Parlor.label(12, theme: t),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -299,9 +320,10 @@ class _MenuScreenState extends State<MenuScreen> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             gradient: LinearGradient(
-                colors: [t.woodMid, t.woodDeep],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter),
+              colors: [t.woodMid, t.woodDeep],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
             border: Border.all(color: t.accent, width: 3),
           ),
           child: SingleChildScrollView(
@@ -352,11 +374,12 @@ class _MenuIcon extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  const _MenuIcon(
-      {required this.theme,
-      required this.icon,
-      required this.label,
-      required this.onTap});
+  const _MenuIcon({
+    required this.theme,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -426,7 +449,10 @@ class _ModeCard extends StatelessWidget {
                     final bots = s.botSeats.where((b) => b < c).toList();
                     if (bots.length >= c) bots.removeLast();
                     s.setSetup(
-                        players: c, botSeats: bots, difficulty: s.difficulty);
+                      players: c,
+                      botSeats: bots,
+                      difficulty: s.difficulty,
+                    );
                   },
                 ),
             ],
@@ -443,8 +469,7 @@ class _ModeCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: theme.playerColors[i],
-                      border:
-                          Border.all(color: theme.accentLight, width: 1.5),
+                      border: Border.all(color: theme.accentLight, width: 1.5),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -463,9 +488,10 @@ class _ModeCard extends StatelessWidget {
                       audio.click();
                       final bots = [...s.botSeats]..remove(i);
                       s.setSetup(
-                          players: s.playerCount,
-                          botSeats: bots,
-                          difficulty: s.difficulty);
+                        players: s.playerCount,
+                        botSeats: bots,
+                        difficulty: s.difficulty,
+                      );
                     },
                   ),
                   const SizedBox(width: 6),
@@ -477,9 +503,10 @@ class _ModeCard extends StatelessWidget {
                       audio.click();
                       final bots = {...s.botSeats, i}.toList();
                       s.setSetup(
-                          players: s.playerCount,
-                          botSeats: bots,
-                          difficulty: s.difficulty);
+                        players: s.playerCount,
+                        botSeats: bots,
+                        difficulty: s.difficulty,
+                      );
                     },
                   ),
                 ],
@@ -494,26 +521,27 @@ class _ModeCard extends StatelessWidget {
               for (int d = 0; d < 3; d++)
                 _Chip(
                   theme: theme,
-                  label:
-                      '${d == 2 && !s.isPro ? '🔒 ' : ''}${difficulties[d]}',
+                  label: '${d == 2 && !s.isPro ? '🔒 ' : ''}${difficulties[d]}',
                   selected: s.difficulty == d,
                   onTap: () async {
                     audio.click();
                     if (d == 2 && !s.isPro) {
-                      await Navigator.of(context)
-                          .push(MaterialPageRoute(
-                        builder: (_) => ProScreen(
-                          audio: audio,
-                          settings: s,
-                          store: screen._store,
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ProScreen(
+                            audio: audio,
+                            settings: s,
+                            store: screen._store,
+                          ),
                         ),
-                      ));
+                      );
                       return;
                     }
                     s.setSetup(
-                        players: s.playerCount,
-                        botSeats: s.botSeats,
-                        difficulty: d);
+                      players: s.playerCount,
+                      botSeats: s.botSeats,
+                      difficulty: d,
+                    );
                   },
                 ),
             ],
@@ -532,13 +560,15 @@ class _ThemeCard extends StatelessWidget {
   const _ThemeCard({required this.theme});
 
   Future<void> _goPro(BuildContext context, _MenuScreenState screen) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ProScreen(
-        audio: screen.widget.audio,
-        settings: screen._s,
-        store: screen._store,
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProScreen(
+          audio: screen.widget.audio,
+          settings: screen._s,
+          store: screen._store,
+        ),
       ),
-    ));
+    );
   }
 
   @override
@@ -562,8 +592,7 @@ class _ThemeCard extends StatelessWidget {
                   theme: theme,
                   th: th,
                   selected: s.themeId == th.id,
-                  locked:
-                      ParlorThemes.isProTheme(th.id) && !isPro,
+                  locked: ParlorThemes.isProTheme(th.id) && !isPro,
                   onTap: () {
                     audio.click();
                     if (ParlorThemes.isProTheme(th.id) && !isPro) {
@@ -586,12 +615,12 @@ class _ThemeCard extends StatelessWidget {
                     _goPro(context, screen);
                     return;
                   }
-                  Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => CustomThemeScreen(
-                      audio: audio,
-                      settings: s,
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          CustomThemeScreen(audio: audio, settings: s),
                     ),
-                  ));
+                  );
                 },
               ),
             ],
@@ -607,8 +636,7 @@ class _ThemeCard extends StatelessWidget {
           const SizedBox(height: 14),
           Align(
             alignment: Alignment.centerLeft,
-            child:
-                Text('Token style:', style: Parlor.body(15, theme: theme)),
+            child: Text('Token style:', style: Parlor.body(15, theme: theme)),
           ),
           const SizedBox(height: 6),
           Wrap(
@@ -688,8 +716,7 @@ class _ThemeTile extends StatelessWidget {
         children: [
           Container(
             width: 96,
-            padding:
-                const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
               color: th.woodDeep.withValues(alpha: 0.7),
@@ -709,13 +736,11 @@ class _ThemeTile extends StatelessWidget {
                       Container(
                         width: 14,
                         height: 14,
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 1.5),
+                        margin: const EdgeInsets.symmetric(horizontal: 1.5),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: c,
-                          border: Border.all(
-                              color: th.accentLight, width: 1),
+                          border: Border.all(color: th.accentLight, width: 1),
                         ),
                       ),
                   ],
@@ -739,8 +764,7 @@ class _ThemeTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 color: Colors.black.withValues(alpha: 0.55),
               ),
-              child: Icon(Icons.lock,
-                  color: theme.accentLight, size: 22),
+              child: Icon(Icons.lock, color: theme.accentLight, size: 22),
             ),
         ],
       ),
@@ -774,8 +798,7 @@ class _NamesCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: theme.playerColors[i],
-                      border:
-                          Border.all(color: theme.accentLight, width: 1.5),
+                      border: Border.all(color: theme.accentLight, width: 1.5),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -792,8 +815,11 @@ class _NamesCard extends StatelessWidget {
             ),
           Text(
             'Names show on dice trays, turn plaques and the winner podium.',
-            style: Parlor.body(12,
-                theme: theme, color: theme.ivory.withValues(alpha: 0.6)),
+            style: Parlor.body(
+              12,
+              theme: theme,
+              color: theme.ivory.withValues(alpha: 0.6),
+            ),
             textAlign: TextAlign.center,
           ),
         ],
@@ -807,11 +833,12 @@ class _NameField extends StatefulWidget {
   final int index;
   final String initial;
   final ValueChanged<String> onDone;
-  const _NameField(
-      {required this.theme,
-      required this.index,
-      required this.initial,
-      required this.onDone});
+  const _NameField({
+    required this.theme,
+    required this.index,
+    required this.initial,
+    required this.onDone,
+  });
 
   @override
   State<_NameField> createState() => _NameFieldState();
@@ -847,8 +874,7 @@ class _NameFieldState extends State<_NameField> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
         color: Colors.black.withValues(alpha: 0.3),
-        border:
-            Border.all(color: widget.theme.accent.withValues(alpha: 0.5)),
+        border: Border.all(color: widget.theme.accent.withValues(alpha: 0.5)),
       ),
       child: TextField(
         controller: _c,
@@ -858,9 +884,11 @@ class _NameFieldState extends State<_NameField> {
           counterText: '',
           border: InputBorder.none,
           hintText: 'Player ${widget.index + 1}',
-          hintStyle: Parlor.body(14,
-              theme: widget.theme,
-              color: widget.theme.ivory.withValues(alpha: 0.4)),
+          hintStyle: Parlor.body(
+            14,
+            theme: widget.theme,
+            color: widget.theme.ivory.withValues(alpha: 0.4),
+          ),
         ),
         onSubmitted: widget.onDone,
         onEditingComplete: () => widget.onDone(_c.text),
@@ -891,45 +919,53 @@ class _SupportCard extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          Builder(builder: (_) {
-            final tips = [
-              store.coffeeProduct,
-              store.chocolateProduct,
-            ].whereType<ProductDetails>().toList();
-            if (!store.storeReady) {
-              return Text(
-                store.error ?? 'Loading…',
-                style: Parlor.body(13,
+          Builder(
+            builder: (_) {
+              final tips = [
+                store.coffeeProduct,
+                store.chocolateProduct,
+              ].whereType<ProductDetails>().toList();
+              if (!store.storeReady) {
+                return Text(
+                  store.error ?? 'Loading…',
+                  style: Parlor.body(
+                    13,
                     theme: theme,
-                    color: theme.ivory.withValues(alpha: 0.6)),
-                textAlign: TextAlign.center,
-              );
-            }
-            if (tips.isEmpty) {
-              return Text('Tips coming soon.',
-                  style: Parlor.body(13,
-                      theme: theme,
-                      color: theme.ivory.withValues(alpha: 0.6)));
-            }
-            return Wrap(
-              spacing: 10,
-              alignment: WrapAlignment.center,
-              children: [
-                for (final p in tips)
-                  _Chip(
-                    theme: theme,
-                    label: p.id == StoreService.chocolateId
-                        ? '🍫 ${p.price}'
-                        : '☕ ${p.price}',
-                    selected: false,
-                    onTap: () {
-                      audio.click();
-                      store.buyTip(p);
-                    },
+                    color: theme.ivory.withValues(alpha: 0.6),
                   ),
-              ],
-            );
-          }),
+                  textAlign: TextAlign.center,
+                );
+              }
+              if (tips.isEmpty) {
+                return Text(
+                  'Tips coming soon.',
+                  style: Parlor.body(
+                    13,
+                    theme: theme,
+                    color: theme.ivory.withValues(alpha: 0.6),
+                  ),
+                );
+              }
+              return Wrap(
+                spacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (final p in tips)
+                    _Chip(
+                      theme: theme,
+                      label: p.id == StoreService.chocolateId
+                          ? '🍫 ${p.price}'
+                          : '☕ ${p.price}',
+                      selected: false,
+                      onTap: () {
+                        audio.click();
+                        store.buyTip(p);
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
         ],
       ),
     );
@@ -941,8 +977,7 @@ class _Card extends StatelessWidget {
   final ParlorThemeDef theme;
   final String title;
   final Widget child;
-  const _Card(
-      {required this.theme, required this.title, required this.child});
+  const _Card({required this.theme, required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -984,11 +1019,12 @@ class _Chip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _Chip(
-      {required this.theme,
-      required this.label,
-      required this.selected,
-      required this.onTap});
+  const _Chip({
+    required this.theme,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1012,8 +1048,11 @@ class _Chip extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: Parlor.label(13,
-              theme: theme, color: selected ? theme.woodDeep : theme.ivory),
+          style: Parlor.label(
+            13,
+            theme: theme,
+            color: selected ? theme.woodDeep : theme.ivory,
+          ),
         ),
       ),
     );

@@ -1,12 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
 import '../services/settings_service.dart';
 import '../theme/artisan_parlor.dart';
 import '../theme/parlor_themes.dart';
 
-/// Ludo PRO: Free-vs-Pro comparison, real purchase, restore, and tip jar.
+/// Ludo PRO: Free-vs-Pro comparison, real purchase, restore, and tip jar
+/// (Android only — the tip section is hidden on iOS).
 /// All prices come from the store — never hardcoded, never placeholders.
 class ProScreen extends StatefulWidget {
   final ParlorAudio audio;
@@ -26,9 +29,9 @@ class ProScreen extends StatefulWidget {
 
 class _ProScreenState extends State<ProScreen> {
   ParlorThemeDef get _t => ParlorThemes.byId(
-        widget.settings.themeId,
-        custom: widget.settings.customTheme,
-      );
+    widget.settings.themeId,
+    custom: widget.settings.customTheme,
+  );
 
   @override
   void initState() {
@@ -43,8 +46,10 @@ class _ProScreenState extends State<ProScreen> {
       widget.audio.win();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('PRO unlocked — enjoy everything!',
-              style: Parlor.body(15, theme: _t)),
+          content: Text(
+            'PRO unlocked — enjoy everything!',
+            style: Parlor.body(15, theme: _t),
+          ),
           backgroundColor: _t.woodDeep,
           behavior: SnackBarBehavior.floating,
         ),
@@ -100,8 +105,7 @@ class _ProScreenState extends State<ProScreen> {
           child: ListenableBuilder(
             listenable: s,
             builder: (_, _) => SingleChildScrollView(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
               child: Column(
                 children: [
                   _ComparisonCard(theme: t, isPro: s.isPro),
@@ -112,12 +116,11 @@ class _ProScreenState extends State<ProScreen> {
                     store: store,
                     audio: widget.audio,
                   ),
-                  const SizedBox(height: 16),
-                  _TipsCard(
-                    theme: t,
-                    store: store,
-                    audio: widget.audio,
-                  ),
+                  // Tips are Android-only: hidden on iOS (App Store).
+                  if (defaultTargetPlatform != TargetPlatform.iOS) ...[
+                    const SizedBox(height: 16),
+                    _TipsCard(theme: t, store: store, audio: widget.audio),
+                  ],
                   const SizedBox(height: 20),
                 ],
               ),
@@ -173,9 +176,11 @@ class _ComparisonCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'One purchase. Yours forever.',
-            style: Parlor.body(13,
-                theme: theme,
-                color: theme.ivory.withValues(alpha: 0.7)),
+            style: Parlor.body(
+              13,
+              theme: theme,
+              color: theme.ivory.withValues(alpha: 0.7),
+            ),
           ),
           const SizedBox(height: 12),
           // Header row.
@@ -183,15 +188,21 @@ class _ComparisonCard extends StatelessWidget {
             children: [
               const Expanded(flex: 5, child: SizedBox()),
               Expanded(
-                  flex: 2,
-                  child: Text('FREE',
-                      style: Parlor.label(12, theme: theme),
-                      textAlign: TextAlign.center)),
+                flex: 2,
+                child: Text(
+                  'FREE',
+                  style: Parlor.label(12, theme: theme),
+                  textAlign: TextAlign.center,
+                ),
+              ),
               Expanded(
-                  flex: 2,
-                  child: Text('PRO',
-                      style: Parlor.label(12, theme: theme),
-                      textAlign: TextAlign.center)),
+                flex: 2,
+                child: Text(
+                  'PRO',
+                  style: Parlor.label(12, theme: theme),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ],
           ),
           const Divider(height: 14),
@@ -204,8 +215,14 @@ class _ComparisonCard extends StatelessWidget {
                     flex: 5,
                     child: Text(r.$1, style: Parlor.body(13, theme: theme)),
                   ),
-                  Expanded(flex: 2, child: _Cell(value: r.$2, theme: theme)),
-                  Expanded(flex: 2, child: _Cell(value: r.$3, theme: theme)),
+                  Expanded(
+                    flex: 2,
+                    child: _Cell(value: r.$2, theme: theme),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: _Cell(value: r.$3, theme: theme),
+                  ),
                 ],
               ),
             ),
@@ -213,15 +230,19 @@ class _ComparisonCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(18),
                   color: theme.accent.withValues(alpha: 0.25),
                   border: Border.all(color: theme.accentLight),
                 ),
-                child: Text('✦ PRO ACTIVE ✦',
-                    style: Parlor.label(14, theme: theme)),
+                child: Text(
+                  '✦ PRO ACTIVE ✦',
+                  style: Parlor.label(14, theme: theme),
+                ),
               ),
             ),
         ],
@@ -241,11 +262,11 @@ class _Cell extends StatelessWidget {
       final v = value as bool;
       return Text(
         v ? '✓' : '—',
-        style: Parlor.body(15,
-            theme: theme,
-            color: v
-                ? theme.accentLight
-                : theme.ivory.withValues(alpha: 0.4)),
+        style: Parlor.body(
+          15,
+          theme: theme,
+          color: v ? theme.accentLight : theme.ivory.withValues(alpha: 0.4),
+        ),
         textAlign: TextAlign.center,
       );
     }
@@ -293,23 +314,29 @@ class _BuyCard extends StatelessWidget {
           Text('Unlock PRO', style: Parlor.display(20, theme: theme)),
           const SizedBox(height: 8),
           if (settings.isPro)
-            Text('You already own PRO — thank you!',
-                style: Parlor.body(14, theme: theme),
-                textAlign: TextAlign.center)
+            Text(
+              'You already own PRO — thank you!',
+              style: Parlor.body(14, theme: theme),
+              textAlign: TextAlign.center,
+            )
           else if (!store.storeReady)
             Text(
               store.error ?? 'Available after store setup.',
-              style: Parlor.body(14,
-                  theme: theme,
-                  color: theme.ivory.withValues(alpha: 0.7)),
+              style: Parlor.body(
+                14,
+                theme: theme,
+                color: theme.ivory.withValues(alpha: 0.7),
+              ),
               textAlign: TextAlign.center,
             )
           else if (pro != null) ...[
-            Text(pro.description.isNotEmpty
-                ? pro.description
-                : 'Unlock everything in Ludo, forever.',
-                style: Parlor.body(14, theme: theme),
-                textAlign: TextAlign.center),
+            Text(
+              pro.description.isNotEmpty
+                  ? pro.description
+                  : 'Unlock everything in Ludo, forever.',
+              style: Parlor.body(14, theme: theme),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 12),
             ValueListenableBuilder<bool>(
               valueListenable: store.purchaseInProgress,
@@ -332,11 +359,15 @@ class _BuyCard extends StatelessWidget {
                 ? const SizedBox.shrink()
                 : Padding(
                     padding: const EdgeInsets.only(top: 10),
-                    child: Text(err,
-                        style: Parlor.body(13,
-                            theme: theme,
-                            color: const Color(0xFFE08A8A)),
-                        textAlign: TextAlign.center),
+                    child: Text(
+                      err,
+                      style: Parlor.body(
+                        13,
+                        theme: theme,
+                        color: const Color(0xFFE08A8A),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
           ),
           const SizedBox(height: 10),
@@ -345,8 +376,10 @@ class _BuyCard extends StatelessWidget {
               audio.click();
               store.restore();
             },
-            child: Text('Restore purchases',
-                style: Parlor.label(13, theme: theme)),
+            child: Text(
+              'Restore purchases',
+              style: Parlor.label(13, theme: theme),
+            ),
           ),
         ],
       ),
@@ -360,8 +393,11 @@ class _TipsCard extends StatelessWidget {
   final ParlorThemeDef theme;
   final StoreService store;
   final ParlorAudio audio;
-  const _TipsCard(
-      {required this.theme, required this.store, required this.audio});
+  const _TipsCard({
+    required this.theme,
+    required this.store,
+    required this.audio,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -397,16 +433,22 @@ class _TipsCard extends StatelessWidget {
           if (!store.storeReady)
             Text(
               store.error ?? 'Available after store setup.',
-              style: Parlor.body(13,
-                  theme: theme,
-                  color: theme.ivory.withValues(alpha: 0.6)),
+              style: Parlor.body(
+                13,
+                theme: theme,
+                color: theme.ivory.withValues(alpha: 0.6),
+              ),
               textAlign: TextAlign.center,
             )
           else if (tips.isEmpty)
-            Text('Tips coming soon.',
-                style: Parlor.body(13,
-                    theme: theme,
-                    color: theme.ivory.withValues(alpha: 0.6)))
+            Text(
+              'Tips coming soon.',
+              style: Parlor.body(
+                13,
+                theme: theme,
+                color: theme.ivory.withValues(alpha: 0.6),
+              ),
+            )
           else
             Wrap(
               spacing: 10,
@@ -434,8 +476,11 @@ class _TipChip extends StatelessWidget {
   final ParlorThemeDef theme;
   final String label;
   final VoidCallback onTap;
-  const _TipChip(
-      {required this.theme, required this.label, required this.onTap});
+  const _TipChip({
+    required this.theme,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -447,8 +492,10 @@ class _TipChip extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           color: Colors.black.withValues(alpha: 0.3),
-          border:
-              Border.all(color: theme.accent.withValues(alpha: 0.6), width: 1.5),
+          border: Border.all(
+            color: theme.accent.withValues(alpha: 0.6),
+            width: 1.5,
+          ),
         ),
         child: Text(label, style: Parlor.label(14, theme: theme)),
       ),

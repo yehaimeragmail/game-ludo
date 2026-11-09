@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+
 import '../services/audio_service.dart';
 import '../services/iap_service.dart';
 import '../services/settings_service.dart';
@@ -11,8 +13,11 @@ import 'pro_screen.dart';
 class SettingsScreen extends StatefulWidget {
   final ParlorAudio audio;
   final ParlorSettings settings;
-  const SettingsScreen(
-      {super.key, required this.audio, required this.settings});
+  const SettingsScreen({
+    super.key,
+    required this.audio,
+    required this.settings,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -21,7 +26,10 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final StoreService _store = StoreService();
 
-  ParlorThemeDef get _t => ParlorThemes.byId(widget.settings.themeId, custom: widget.settings.customTheme);
+  ParlorThemeDef get _t => ParlorThemes.byId(
+    widget.settings.themeId,
+    custom: widget.settings.customTheme,
+  );
 
   @override
   void initState() {
@@ -86,8 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         body: ListenableBuilder(
           listenable: s,
           builder: (_, _) => SingleChildScrollView(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -102,9 +109,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       audio.click();
                       await s.setMusic(v);
                       audio.configure(
-                          musicOn: s.musicOn,
-                          sfxOn: s.sfxOn,
-                          volume: s.volume);
+                        musicOn: s.musicOn,
+                        sfxOn: s.sfxOn,
+                        volume: s.volume,
+                      );
                       if (v) {
                         audio.startMenuMusic();
                       } else {
@@ -122,9 +130,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (v) async {
                       await s.setSfx(v);
                       audio.configure(
-                          musicOn: s.musicOn,
-                          sfxOn: s.sfxOn,
-                          volume: s.volume);
+                        musicOn: s.musicOn,
+                        sfxOn: s.sfxOn,
+                        volume: s.volume,
+                      );
                       if (v) audio.click();
                     },
                   ),
@@ -137,9 +146,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (v) async {
                     await s.setVolume(v);
                     audio.configure(
-                        musicOn: s.musicOn,
-                        sfxOn: s.sfxOn,
-                        volume: s.volume);
+                      musicOn: s.musicOn,
+                      sfxOn: s.sfxOn,
+                      volume: s.volume,
+                    );
                   },
                 ),
                 const SizedBox(height: 10),
@@ -150,30 +160,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   control: GestureDetector(
                     onTap: () {
                       audio.click();
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => ProScreen(
-                          audio: audio,
-                          settings: s,
-                          store: _store,
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ProScreen(
+                            audio: audio,
+                            settings: s,
+                            store: _store,
+                          ),
                         ),
-                      ));
+                      );
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(18),
                         color: s.isPro
                             ? t.accent.withValues(alpha: 0.85)
                             : Colors.black.withValues(alpha: 0.3),
-                        border: Border.all(
-                            color: t.accentLight, width: 2),
+                        border: Border.all(color: t.accentLight, width: 2),
                       ),
                       child: Text(
                         s.isPro ? '✦ PRO' : 'View',
-                        style: Parlor.label(13,
-                            theme: t,
-                            color: s.isPro ? t.woodDeep : t.ivory),
+                        style: Parlor.label(
+                          13,
+                          theme: t,
+                          color: s.isPro ? t.woodDeep : t.ivory,
+                        ),
                       ),
                     ),
                   ),
@@ -196,17 +211,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       GestureDetector(
                         onTap: () async {
                           audio.click();
-                          final locked = ParlorThemes.isProTheme(th.id) &&
-                              !s.isPro;
+                          final locked =
+                              ParlorThemes.isProTheme(th.id) && !s.isPro;
                           if (locked) {
-                            await Navigator.of(context)
-                                .push(MaterialPageRoute(
-                              builder: (_) => ProScreen(
-                                audio: audio,
-                                settings: s,
-                                store: _store,
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ProScreen(
+                                  audio: audio,
+                                  settings: s,
+                                  store: _store,
+                                ),
                               ),
-                            ));
+                            );
                             return;
                           }
                           await s.setTheme(th.id);
@@ -219,10 +235,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               height: 44,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
-                                gradient: LinearGradient(colors: [
-                                  th.woodMid,
-                                  th.accent,
-                                ]),
+                                gradient: LinearGradient(
+                                  colors: [th.woodMid, th.accent],
+                                ),
                                 border: Border.all(
                                   color: s.themeId == th.id
                                       ? th.accentLight
@@ -232,15 +247,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                               alignment: Alignment.center,
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.center,
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   for (int i = 0; i < 2; i++)
                                     Container(
                                       width: 10,
                                       height: 10,
                                       margin: const EdgeInsets.symmetric(
-                                          horizontal: 1.5),
+                                        horizontal: 1.5,
+                                      ),
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         color: th.playerColors[i],
@@ -249,19 +264,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ],
                               ),
                             ),
-                            if (ParlorThemes.isProTheme(th.id) &&
-                                !s.isPro)
+                            if (ParlorThemes.isProTheme(th.id) && !s.isPro)
                               Container(
                                 width: 64,
                                 height: 44,
                                 decoration: BoxDecoration(
-                                  borderRadius:
-                                      BorderRadius.circular(8),
-                                  color: Colors.black
-                                      .withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.black.withValues(alpha: 0.55),
                                 ),
-                                child: Icon(Icons.lock,
-                                    color: t.accentLight, size: 18),
+                                child: Icon(
+                                  Icons.lock,
+                                  color: t.accentLight,
+                                  size: 18,
+                                ),
                               ),
                           ],
                         ),
@@ -274,9 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Wrap(
                   spacing: 8,
                   children: [
-                    for (int i = 0;
-                        i < TokenShapes.names.length;
-                        i++)
+                    for (int i = 0; i < TokenShapes.names.length; i++)
                       _MiniChip(
                         theme: t,
                         label:
@@ -285,14 +298,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: () async {
                           audio.click();
                           if (TokenShapes.isPro(i) && !s.isPro) {
-                            await Navigator.of(context)
-                                .push(MaterialPageRoute(
-                              builder: (_) => ProScreen(
-                                audio: audio,
-                                settings: s,
-                                store: _store,
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ProScreen(
+                                  audio: audio,
+                                  settings: s,
+                                  store: _store,
+                                ),
                               ),
-                            ));
+                            );
                             return;
                           }
                           await s.setTokenShape(i);
@@ -315,14 +329,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: () async {
                           audio.click();
                           if (DiceStyles.isPro(i) && !s.isPro) {
-                            await Navigator.of(context)
-                                .push(MaterialPageRoute(
-                              builder: (_) => ProScreen(
-                                audio: audio,
-                                settings: s,
-                                store: _store,
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ProScreen(
+                                  audio: audio,
+                                  settings: s,
+                                  store: _store,
+                                ),
                               ),
-                            ));
+                            );
                             return;
                           }
                           await s.setDiceStyle(i);
@@ -331,75 +346,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _SectionTitle('Support', t),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: t.woodDeep.withValues(alpha: 0.65),
-                    border: Border.all(
-                        color: t.accent.withValues(alpha: 0.4), width: 1.5),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        'Ludo is 100% free. Tips keep the parlor open!',
-                        style: Parlor.body(14, theme: t),
-                        textAlign: TextAlign.center,
+                // Tips are Android-only: hidden on iOS (App Store).
+                if (defaultTargetPlatform != TargetPlatform.iOS) ...[
+                  _SectionTitle('Support', t),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: t.woodDeep.withValues(alpha: 0.65),
+                      border: Border.all(
+                        color: t.accent.withValues(alpha: 0.4),
+                        width: 1.5,
                       ),
-                      const SizedBox(height: 10),
-                      Builder(builder: (_) {
-                        final tips = [
-                          _store.coffeeProduct,
-                          _store.chocolateProduct,
-                        ].whereType<ProductDetails>().toList();
-                        if (!_store.storeReady) {
-                          return Text(
-                            _store.error ?? 'Loading…',
-                            style: Parlor.body(13,
-                                theme: t,
-                                color:
-                                    t.ivory.withValues(alpha: 0.6)),
-                            textAlign: TextAlign.center,
-                          );
-                        }
-                        if (tips.isEmpty) {
-                          return Text('Tips coming soon.',
-                              style: Parlor.body(13,
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Ludo is 100% free. Tips keep the parlor open!',
+                          style: Parlor.body(14, theme: t),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 10),
+                        Builder(
+                          builder: (_) {
+                            final tips = [
+                              _store.coffeeProduct,
+                              _store.chocolateProduct,
+                            ].whereType<ProductDetails>().toList();
+                            if (!_store.storeReady) {
+                              return Text(
+                                _store.error ?? 'Loading…',
+                                style: Parlor.body(
+                                  13,
                                   theme: t,
-                                  color: t.ivory
-                                      .withValues(alpha: 0.6)));
-                        }
-                        return Wrap(
-                          spacing: 10,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            for (final p in tips)
-                              _MiniChip(
-                                theme: t,
-                                label: p.id == StoreService.chocolateId
-                                    ? '🍫 ${p.price}'
-                                    : '☕ ${p.price}',
-                                selected: false,
-                                onTap: () {
-                                  audio.click();
-                                  _store.buyTip(p);
-                                },
-                              ),
-                          ],
-                        );
-                      }),
-                    ],
+                                  color: t.ivory.withValues(alpha: 0.6),
+                                ),
+                                textAlign: TextAlign.center,
+                              );
+                            }
+                            if (tips.isEmpty) {
+                              return Text(
+                                'Tips coming soon.',
+                                style: Parlor.body(
+                                  13,
+                                  theme: t,
+                                  color: t.ivory.withValues(alpha: 0.6),
+                                ),
+                              );
+                            }
+                            return Wrap(
+                              spacing: 10,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                for (final p in tips)
+                                  _MiniChip(
+                                    theme: t,
+                                    label: p.id == StoreService.chocolateId
+                                        ? '🍫 ${p.price}'
+                                        : '☕ ${p.price}',
+                                    selected: false,
+                                    onTap: () {
+                                      audio.click();
+                                      _store.buyTip(p);
+                                    },
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ],
                 _SectionTitle('About', t),
                 Text(
                   'Ludo — Artisan Parlor edition.\nVersion 2.0.0 • Made with ♥ by WAJIHA',
-                  style: Parlor.body(13,
-                      theme: t,
-                      color: t.ivory.withValues(alpha: 0.65)),
+                  style: Parlor.body(
+                    13,
+                    theme: t,
+                    color: t.ivory.withValues(alpha: 0.65),
+                  ),
                 ),
                 const SizedBox(height: 30),
               ],
@@ -430,11 +458,12 @@ class _MiniChip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _MiniChip(
-      {required this.theme,
-      required this.label,
-      required this.selected,
-      required this.onTap});
+  const _MiniChip({
+    required this.theme,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -442,8 +471,7 @@ class _MiniChip extends StatelessWidget {
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           color: selected
@@ -458,9 +486,11 @@ class _MiniChip extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: Parlor.label(13,
-              theme: theme,
-              color: selected ? theme.woodDeep : theme.ivory),
+          style: Parlor.label(
+            13,
+            theme: theme,
+            color: selected ? theme.woodDeep : theme.ivory,
+          ),
         ),
       ),
     );
