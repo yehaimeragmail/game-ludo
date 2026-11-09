@@ -207,6 +207,48 @@ jobs:
           EOF
           echo "ExportOptions.plist written for $BUNDLE_ID with profile '$PROFILE_NAME'."
 
+      - name: Scope provisioning profile to the Runner target only
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source signing-info.env
+          # Run #9 (9 Nov 2026) failed in the archive step: the workflow
+          # passed PROVISIONING_PROFILE_SPECIFIER as a global xcodebuild
+          # override, and Xcode applied it to EVERY target — including
+          # Swift Package Manager package targets (share_plus, url_launcher,
+          # in_app_purchase_storekit, ...), which do not support provisioning
+          # profiles ("does not support provisioning profiles", exit 65).
+          # Fix: write the specifier into the Runner target's own Release
+          # and Profile build settings in project.pbxproj (the configs whose
+          # PRODUCT_BUNDLE_IDENTIFIER is exactly this game's Bundle ID), and
+          # do NOT pass it as a global override at archive time. The global
+          # CODE_SIGN_STYLE / DEVELOPMENT_TEAM / CODE_SIGN_IDENTITY overrides
+          # stay — only the profile specifier breaks package targets.
+          python3 - ios/Runner.xcodeproj/project.pbxproj <<'PYEOF'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p).read()
+          bundle = __import__('os').environ['BUNDLE_ID']
+          profile = __import__('os').environ['PROFILE_NAME']
+          pat = re.compile(r'(\t\t[0-9A-F]{24} /\* (?:Release|Profile) \*/ = \{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbaseConfigurationReference = [^;]+;\n\t\t\tbuildSettings = \{.*?\n\t\t\t\};\n\t\t\tname = (?:Release|Profile);\n\t\t\};)', re.S)
+          count = [0]
+          def repl(m):
+              block = m.group(1)
+              if f'PRODUCT_BUNDLE_IDENTIFIER = {bundle};' in block and 'PROVISIONING_PROFILE_SPECIFIER' not in block:
+                  count[0] += 1
+                  return block.replace(f'PRODUCT_BUNDLE_IDENTIFIER = {bundle};',
+                      f'PRODUCT_BUNDLE_IDENTIFIER = {bundle};\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "{profile}";', 1)
+              return block
+          s2 = pat.sub(repl, s)
+          if count[0] == 0:
+              print('::error::Could not find the Runner Release/Profile build settings to scope the provisioning profile.')
+              sys.exit(1)
+          open(p, 'w').write(s2)
+          print(f'Provisioning profile scoped to Runner target in {count[0]} build configuration(s).')
+          PYEOF
+          grep -c 'PROVISIONING_PROFILE_SPECIFIER' ios/Runner.xcodeproj/project.pbxproj
+
       - name: Build Flutter artefacts (unsigned), then signed archive + IPA
         shell: bash
         run: |
@@ -219,8 +261,7 @@ jobs:
             -archivePath build/Runner.xcarchive archive \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_IDENTITY="$IDENTITY_SHA" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+            CODE_SIGN_IDENTITY="$IDENTITY_SHA"
           xcodebuild -exportArchive \
             -archivePath build/Runner.xcarchive \
             -exportPath build/ios/ipa \
