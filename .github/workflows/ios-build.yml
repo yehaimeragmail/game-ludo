@@ -169,9 +169,19 @@ jobs:
             -k "$KEYCHAIN_NAME" -P "$KEYCHAIN_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
           security list-keychains -d user -s "$KEYCHAIN_NAME" login.keychain-db
-          security find-identity -v -p codesigning "$KEYCHAIN_NAME" | grep -i "Apple Distribution" \
-            || { echo "::error::No Apple Distribution identity found in the imported .p12."; exit 1; }
-          echo "Distribution certificate imported."
+          # The identity name depends on how the certificate was created:
+          # portal iOS Distribution certificates are named "iPhone
+          # Distribution: ..." while Xcode-made ones are "Apple
+          # Distribution: ...". Grep for "Distribution" (either form) and
+          # use the identity's SHA-1 hash for signing, so the name never
+          # has to be guessed (run #8, 9 Nov 2026: grep for "Apple
+          # Distribution" could never match the new "iPhone Distribution"
+          # certificate even though it had imported fine).
+          security find-identity -v -p codesigning "$KEYCHAIN_NAME" | grep -i "Distribution" \
+            || { echo "::error::No Distribution identity found in the imported .p12."; exit 1; }
+          IDENTITY_SHA=$(security find-identity -v -p codesigning "$KEYCHAIN_NAME" | grep -i "Distribution" | head -n1 | awk '{print $2}')
+          echo "IDENTITY_SHA=$IDENTITY_SHA" >> signing-info.env
+          echo "Distribution certificate imported (identity $IDENTITY_SHA)."
 
       - name: Generate ExportOptions.plist from the profile
         shell: bash
@@ -209,7 +219,7 @@ jobs:
             -archivePath build/Runner.xcarchive archive \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_IDENTITY="$IDENTITY_SHA" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
           xcodebuild -exportArchive \
             -archivePath build/Runner.xcarchive \
