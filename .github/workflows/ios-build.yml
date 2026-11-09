@@ -225,12 +225,15 @@ jobs:
           # do NOT pass it as a global override at archive time. The global
           # CODE_SIGN_STYLE / DEVELOPMENT_TEAM / CODE_SIGN_IDENTITY overrides
           # stay — only the profile specifier breaks package targets.
-          python3 - ios/Runner.xcodeproj/project.pbxproj <<'PYEOF'
+          # NOTE (run #10, 9 Nov 2026): `source signing-info.env` sets
+          # ordinary shell variables, which are NOT exported to child
+          # processes — so Python's os.environ has no BUNDLE_ID (KeyError).
+          # Pass the values as command-line arguments instead, never via
+          # the environment.
+          python3 - "$BUNDLE_ID" "$PROFILE_NAME" ios/Runner.xcodeproj/project.pbxproj <<'PYEOF'
           import re, sys
-          p = sys.argv[1]
+          bundle, profile, p = sys.argv[1], sys.argv[2], sys.argv[3]
           s = open(p).read()
-          bundle = __import__('os').environ['BUNDLE_ID']
-          profile = __import__('os').environ['PROFILE_NAME']
           pat = re.compile(r'(\t\t[0-9A-F]{24} /\* (?:Release|Profile) \*/ = \{\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbaseConfigurationReference = [^;]+;\n\t\t\tbuildSettings = \{.*?\n\t\t\t\};\n\t\t\tname = (?:Release|Profile);\n\t\t\};)', re.S)
           count = [0]
           def repl(m):
